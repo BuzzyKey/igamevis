@@ -1188,6 +1188,104 @@ void igQtMainWindow::initAllFilters() {
         GlobalIdDockWidget->raise();
         GlobalIdWidget->setFocus(Qt::OtherFocusReason);
     });
+
+    // ExtractSubset Filter - Extract a subset from structured mesh
+    connect(ui->menu_filters->addAction(QStringLiteral("提取子集 (Extract Subset)")), &QAction::triggered, this, [&](bool checked) {
+        if (rendererWidget->GetScene() == nullptr
+            || rendererWidget->GetScene()->GetCurrentModel() == nullptr) {
+            showDarkFramelessMessage(QStringLiteral("提取子集"), QStringLiteral("请先加载并选择模型。"));
+            return;
+        }
+
+        auto obj = rendererWidget->GetScene()->GetCurrentModel()->GetDataObject();
+        if (obj == nullptr) {
+            showDarkFramelessMessage(QStringLiteral("提取子集"), QStringLiteral("当前模型没有可用数据。"));
+            return;
+        }
+
+        // Check if input is StructuredMesh
+        auto mesh = DynamicCast<StructuredMesh>(obj);
+        if (mesh == nullptr) {
+            showDarkFramelessMessage(QStringLiteral("提取子集"), QStringLiteral("该算法只支持结构化网格 (StructuredMesh)。"));
+            return;
+        }
+
+        igIndex* dimSize = mesh->GetDimensionSize();
+        QString description = QString("该算法从结构化网格中提取一个子区域。<br><br>"
+                                     "当前网格维度: %1 x %2 x %3<br>"
+                                     "请设置要提取的区域范围（I, J, K 方向的最小/最大索引）。<br>"
+                                     "如果最大索引设为 -1，则默认为该方向的最大值。").arg(dimSize[0]).arg(dimSize[1]).arg(dimSize[2]);
+
+        igQtFilterDialogDockWidget* dialog = new igQtFilterDialogDockWidget(this, true);
+        dialog->setFilterTitle(QStringLiteral("提取子集 (Extract Subset)"));
+        dialog->setFilterDescription(description);
+
+        // Add parameters for VOI (Volume of Interest)
+        int minI_id = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT, QStringLiteral("最小 I 索引 (minI)"), "0");
+        int maxI_id = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT, QStringLiteral("最大 I 索引 (maxI)"), "-1");
+        int minJ_id = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT, QStringLiteral("最小 J 索引 (minJ)"), "0");
+        int maxJ_id = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT, QStringLiteral("最大 J 索引 (maxJ)"), "-1");
+        int minK_id = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT, QStringLiteral("最小 K 索引 (minK)"), "0");
+        int maxK_id = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT, QStringLiteral("最大 K 索引 (maxK)"), "-1");
+
+        dialog->show();
+
+        dialog->setApplyFunctor([=, this]() {
+            bool ok;
+
+            // Get parameter values
+            int minI = dialog->getInt(minI_id, ok);
+            int maxI = dialog->getInt(maxI_id, ok);
+            int minJ = dialog->getInt(minJ_id, ok);
+            int maxJ = dialog->getInt(maxJ_id, ok);
+            int minK = dialog->getInt(minK_id, ok);
+            int maxK = dialog->getInt(maxK_id, ok);
+
+            if (!ok) {
+                showDarkFramelessMessage(QStringLiteral("参数错误"), QStringLiteral("请输入有效的整数参数。"));
+                return;
+            }
+
+            // Validate parameters
+            if (minI < 0 || minJ < 0 || minK < 0) {
+                showDarkFramelessMessage(QStringLiteral("参数错误"), QStringLiteral("最小索引不能为负数。"));
+                return;
+            }
+
+            if (minI > maxI && maxI != -1 || minJ > maxJ && maxJ != -1 || minK > maxK && maxK != -1) {
+                showDarkFramelessMessage(QStringLiteral("参数错误"), QStringLiteral("最小索引不能大于最大索引。"));
+                return;
+            }
+
+            // Create and execute filter
+            ExtractSubsetFilter::Pointer filter = ExtractSubsetFilter::New();
+            filter->SetVOI(minI, maxI, minJ, maxJ, minK, maxK);
+            filter->SetInput(obj);
+
+            ok = filter->Execute();
+
+            if (!ok) {
+                showDarkFramelessMessage(QStringLiteral("执行出错"), QStringLiteral("子集提取失败，请检查参数是否超出网格范围。"));
+                dialog->close();
+                return;
+            }
+
+            auto output = filter->GetOutput(0);
+            if (output == nullptr) {
+                showDarkFramelessMessage(QStringLiteral("执行出错"), QStringLiteral("算法未产生有效结果。"));
+                dialog->close();
+                return;
+            }
+
+            // Set output name and add to scene
+            output->SetName("Subset_" + obj->GetName());
+            modelTreeWidget->addDataObjectToModelTree(output, Algorithm);
+            rendererWidget->update();
+
+            dialog->close();
+        });
+    });
+
     connect(modelTreeWidget, &igQtModelDialogWidget::CurrendModelChanged, this, [this]() {
         if (!GlobalIdDockWidget || !GlobalIdDockWidget->isVisible()) return;
         QTimer::singleShot(0, this, [this]() {
