@@ -294,6 +294,7 @@ igame_add_example(testVortexExtraction Filter/FeatureExtraction/VortexExtraction
 igame_add_example(testCurvatureExtraction Filter/FeatureExtraction/CurvatureExtraction.cpp)
 igame_add_example(testGradientExtraction Filter/FeatureExtraction/GradientExtraction.cpp)
 igame_add_example(testLaplacianExtraction Filter/FeatureExtraction/LaplacianExtraction.cpp)
+igame_add_example(testExtractComponent Filter/TestExtractComponent.cpp)
 
 if (ENABLE_LIBTORCH_MODULE)
     igame_add_example(testVortexDetection Filter/FeatureExtraction/VortexDetection.cpp)

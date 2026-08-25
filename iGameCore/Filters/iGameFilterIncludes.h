@@ -1,3 +1,4 @@
+#include "Attribute/iGameExtractComponentFilter.h"
 #include "Clip/iGameClipFilter.h"
 #include "Contour/iGameContourFilter.h"
 #include "Convert/iGameConvertToPointCloudFilter.h"
