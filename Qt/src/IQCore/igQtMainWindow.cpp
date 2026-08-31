@@ -1231,17 +1231,22 @@ void igQtMainWindow::initAllFilters() {
         dialog->show();
 
         dialog->setApplyFunctor([=, this]() {
-            bool ok;
+            // 6 个参数各自独立的解析标志，任一解析失败都能被独立检测到。
+            // 原写法共享一个 ok：若 minI 解析失败但 maxI 成功，ok 会被覆盖为 true，
+            // 导致 minI 的解析错误被静默吞掉。
 
             // Get parameter values
-            int minI = dialog->getInt(minI_id, ok);
-            int maxI = dialog->getInt(maxI_id, ok);
-            int minJ = dialog->getInt(minJ_id, ok);
-            int maxJ = dialog->getInt(maxJ_id, ok);
-            int minK = dialog->getInt(minK_id, ok);
-            int maxK = dialog->getInt(maxK_id, ok);
+            bool okMinI = false, okMaxI = false;
+            bool okMinJ = false, okMaxJ = false;
+            bool okMinK = false, okMaxK = false;
+            int minI = dialog->getInt(minI_id, okMinI);
+            int maxI = dialog->getInt(maxI_id, okMaxI);
+            int minJ = dialog->getInt(minJ_id, okMinJ);
+            int maxJ = dialog->getInt(maxJ_id, okMaxJ);
+            int minK = dialog->getInt(minK_id, okMinK);
+            int maxK = dialog->getInt(maxK_id, okMaxK);
 
-            if (!ok) {
+            if (!okMinI || !okMaxI || !okMinJ || !okMaxJ || !okMinK || !okMaxK) {
                 showDarkFramelessMessage(QStringLiteral("参数错误"), QStringLiteral("请输入有效的整数参数。"));
                 return;
             }
@@ -1262,9 +1267,9 @@ void igQtMainWindow::initAllFilters() {
             filter->SetVOI(minI, maxI, minJ, maxJ, minK, maxK);
             filter->SetInput(obj);
 
-            ok = filter->Execute();
+            bool filterOk = filter->Execute();
 
-            if (!ok) {
+            if (!filterOk) {
                 showDarkFramelessMessage(QStringLiteral("执行出错"), QStringLiteral("子集提取失败，请检查参数是否超出网格范围。"));
                 dialog->close();
                 return;

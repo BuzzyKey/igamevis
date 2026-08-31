@@ -11,7 +11,9 @@ public:
     I_OBJECT(ExtractSubsetFilter);
     static Pointer New() { return new ExtractSubsetFilter; }
 
-    void SetVOI(igIndex minI, int maxI, int minJ, int maxJ, int minK, int maxK) {
+    // VOI 参数统一使用 int 类型，与 .cpp 中的局部变量以及 GUI 端的 getInt()
+    // 调用保持一致，避免 igIndex / int 混用带来的类型不一致。
+    void SetVOI(int minI, int maxI, int minJ, int maxJ, int minK, int maxK) {
         m_VOI[0] = minI;
         m_VOI[1] = maxI;
         m_VOI[2] = minJ;
@@ -40,7 +42,7 @@ protected:
     }
     ~ExtractSubsetFilter() override = default;
 
-    igIndex m_VOI[6];
+    int m_VOI[6];
     StructuredMesh::Pointer m_InputMesh{};
     StructuredMesh::Pointer m_OutputMesh{};
 };
