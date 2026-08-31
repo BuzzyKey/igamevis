@@ -37,4 +37,8 @@ private:
     iGame::DataObject::Pointer m_OriginDataObject{nullptr};
     iGame::DataObject::Pointer m_ResultDataObject{nullptr};
     bool m_Generated{false};
+    // Parallel to the input-array combo items: raw array name and attachment type
+    // (IG_POINT / IG_CELL) so same-named Point/Cell arrays can be disambiguated.
+    std::vector<QString> m_InputArrayNames;
+    std::vector<int> m_InputArrayAttachments;
 };

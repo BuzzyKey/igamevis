@@ -44,29 +44,44 @@ void igQtExtractComponentWidget::SetOriginDataObject(iGame::DataObject::Pointer 
 
 void igQtExtractComponentWidget::InitInputArrayList() {
     ui->comboBox_InputArray->clear();
+    m_InputArrayNames.clear();
+    m_InputArrayAttachments.clear();
     if (m_OriginDataObject == nullptr) return;
     auto attrSet = m_OriginDataObject->GetAttributeSet();
     if (attrSet == nullptr) return;
-    // 列出所有数据数组（对齐 Paraview Extract Component 的 Input Array：任意类型均可选，
-    // 1 维数组可选但分量选项会被禁用）
+    // List all data arrays with their attachment type, so same-named Point/Cell arrays
+    // (e.g. Velocity on both PointData and CellData) can be told apart in the combo.
     auto all = attrSet->GetAllAttributes();
     for (IGsize i = 0; i < all->GetNumberOfElements(); ++i) {
         auto& attr = all->GetElement(i);
-        if (!attr.IsNone()) {
-            ui->comboBox_InputArray->addItem(QString::fromStdString(attr.pointer->GetName()));
-        }
+        if (attr.IsNone()) continue;
+        const QString name = QString::fromStdString(attr.pointer->GetName());
+        const QString label = attr.attachmentType == IG_CELL
+                                      ? name + QStringLiteral(" (Cell)")
+                                      : name + QStringLiteral(" (Point)");
+        ui->comboBox_InputArray->addItem(label);
+        m_InputArrayNames.push_back(name);
+        m_InputArrayAttachments.push_back(static_cast<int>(attr.attachmentType));
     }
-    // 默认选中第一个数组（输入数组可选：不切换即用第一个）
+    // Defaults to the first array (input array is optional).
 }
 
 int igQtExtractComponentWidget::GetSelectedInputDimension() {
     if (m_OriginDataObject == nullptr) return 0;
-    const std::string inputName = ui->comboBox_InputArray->currentText().toStdString();
+    const int idx = ui->comboBox_InputArray->currentIndex();
+    if (idx < 0 || idx >= static_cast<int>(m_InputArrayNames.size())) return 0;
     auto attrSet = m_OriginDataObject->GetAttributeSet();
     if (attrSet == nullptr) return 0;
-    auto attr = attrSet->GetAttribute(inputName);
-    if (attr.IsNone() || attr.pointer == nullptr) return 0;
-    return attr.pointer->GetDimension();
+    // Look up by raw name + attachment type to disambiguate same-named arrays.
+    auto all = attrSet->GetAllAttributes();
+    for (IGsize i = 0; i < all->GetNumberOfElements(); ++i) {
+        auto& candidate = all->GetElement(i);
+        if (candidate.IsNone()) continue;
+        if (candidate.pointer->GetName() != m_InputArrayNames[idx].toStdString()) continue;
+        if (candidate.attachmentType != m_InputArrayAttachments[idx]) continue;
+        return candidate.pointer->GetDimension();
+    }
+    return 0;
 }
 
 // 按输入数组维度动态生成分量选项：1 维禁用；2 维 X/Y；3 维 X/Y/Z；更高维用数字 1..N
@@ -109,7 +124,13 @@ void igQtExtractComponentWidget::Apply() {
         return;
     }
 
-    const std::string inputName = ui->comboBox_InputArray->currentText().toStdString();
+    const int inputIndex = ui->comboBox_InputArray->currentIndex();
+    if (inputIndex < 0 || inputIndex >= static_cast<int>(m_InputArrayNames.size())) {
+        Q_EMIT ApplyFailed(QStringLiteral("Please select an input array"));
+        return;
+    }
+    const std::string inputName = m_InputArrayNames[inputIndex].toStdString();
+    const IGenum inputAttachment = static_cast<IGenum>(m_InputArrayAttachments[inputIndex]);
     std::string outputName = ui->lineEdit_OutputName->text().toStdString();
     if (outputName.empty()) outputName = "Result";
     const int component = ui->comboBox_Component->currentIndex();
@@ -117,6 +138,7 @@ void igQtExtractComponentWidget::Apply() {
     auto filter = iGame::ExtractComponentFilter::New();
     filter->SetInput(m_OriginDataObject);
     filter->SetInputArrayName(inputName);
+    filter->SetInputAttachmentType(inputAttachment);
     filter->SetOutputArrayName(outputName);
     filter->SetComponent(component);
     if (!filter->Execute()) {

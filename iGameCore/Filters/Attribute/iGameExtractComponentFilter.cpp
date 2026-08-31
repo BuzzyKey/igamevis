@@ -25,19 +25,23 @@ bool ExtractComponentFilter::Execute() {
         return false;
     }
 
-    // 解析输入数组：显式指定名称（任意类型数组），或使用属性集中第一个数组（对应 DIME「可选」）
+    // Resolve the input array: by explicit name (with optional attachment restriction) or,
+    // when no name is given, the first array matching the attachment restriction.
+    // The attachment type disambiguates same-named arrays attached to both PointData and CellData.
     AttributeSet::Attribute attr;
-    if (m_InputArrayName.empty()) {
-        auto allAttributes = attributeSet->GetAllAttributes();
-        for (IGsize i = 0; i < allAttributes->GetNumberOfElements(); ++i) {
-            auto& candidate = allAttributes->GetElement(i);
-            if (!candidate.IsNone()) {
-                attr = candidate;
-                break;
-            }
+    auto matches = [&](const AttributeSet::Attribute& candidate) {
+        if (candidate.IsNone()) return false;
+        if (!m_InputArrayName.empty() && candidate.pointer->GetName() != m_InputArrayName) return false;
+        if (m_InputAttachmentType != IG_NONE && candidate.attachmentType != m_InputAttachmentType) return false;
+        return true;
+    };
+    auto inputAttributes = attributeSet->GetAllAttributes();
+    for (IGsize i = 0; i < inputAttributes->GetNumberOfElements(); ++i) {
+        auto& candidate = inputAttributes->GetElement(i);
+        if (matches(candidate)) {
+            attr = candidate;
+            break;
         }
-    } else {
-        attr = attributeSet->GetAttribute(m_InputArrayName);
     }
     if (attr.IsNone()) {
         m_Message = m_InputArrayName.empty() ? "找不到输入数组" : "找不到输入数组: " + m_InputArrayName;
@@ -50,13 +54,32 @@ bool ExtractComponentFilter::Execute() {
         return false;
     }
 
-    // 输出标量数组类型与输入保持一致（Paraview Extract Component 行为）
+    // Create the output scalar array with the same concrete type as the input
+    // (e.g. Int/LongLong stay Int/LongLong) to avoid silent type conversion or precision loss.
     IGsize elementNum = attr.pointer->GetNumberOfElements();
     ArrayObject::Pointer output;
     if (DynamicCast<FloatArray>(attr.pointer) != nullptr) {
         output = FloatArray::New();
-    } else {
+    } else if (DynamicCast<DoubleArray>(attr.pointer) != nullptr) {
         output = DoubleArray::New();
+    } else if (DynamicCast<IntArray>(attr.pointer) != nullptr) {
+        output = IntArray::New();
+    } else if (DynamicCast<UnsignedIntArray>(attr.pointer) != nullptr) {
+        output = UnsignedIntArray::New();
+    } else if (DynamicCast<CharArray>(attr.pointer) != nullptr) {
+        output = CharArray::New();
+    } else if (DynamicCast<UnsignedCharArray>(attr.pointer) != nullptr) {
+        output = UnsignedCharArray::New();
+    } else if (DynamicCast<ShortArray>(attr.pointer) != nullptr) {
+        output = ShortArray::New();
+    } else if (DynamicCast<UnsignedShortArray>(attr.pointer) != nullptr) {
+        output = UnsignedShortArray::New();
+    } else if (DynamicCast<LongLongArray>(attr.pointer) != nullptr) {
+        output = LongLongArray::New();
+    } else if (DynamicCast<UnsignedLongLongArray>(attr.pointer) != nullptr) {
+        output = UnsignedLongLongArray::New();
+    } else {
+        output = DoubleArray::New();  // fallback
     }
     output->SetDimension(1);
     output->SetName(m_OutputArrayName);

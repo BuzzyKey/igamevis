@@ -408,6 +408,139 @@ bool VerifyRealData(iGame::UnstructuredMesh::Pointer mesh, const std::string& in
     ok = ok && (range != nullptr) && (range->GetValue(2) == minV) && (range->GetValue(3) == maxV);
     return ok;
 }
+
+// The output array keeps the same concrete type as the input (Int -> Int, LongLong -> LongLong, ...).
+bool VerifyOutputTypePreserved() {
+    bool allOk = true;
+
+    // IntArray input
+    auto meshInt = iGame::UnstructuredMesh::New();
+    meshInt->AddPoint(iGame::Point(0.f, 0.f, 0.f));
+    meshInt->AddPoint(iGame::Point(1.f, 0.f, 0.f));
+    meshInt->AddPoint(iGame::Point(0.f, 1.f, 0.f));
+    meshInt->AddPoint(iGame::Point(0.f, 0.f, 1.f));
+    igIndex cell[4] = {0, 1, 2, 3};
+    meshInt->AddCell(cell, 4, iGame::IG_TETRA);
+    auto vecInt = iGame::IntArray::New();
+    vecInt->SetName("vecInt");
+    vecInt->SetDimension(3);
+    for (int i = 0; i < 4; ++i) {
+        int v[3] = {i, i + 1, i + 2};
+        vecInt->AddElement(v);
+    }
+    meshInt->GetAttributeSet()->AddVector(IG_POINT, vecInt);
+
+    auto fInt = iGame::ExtractComponentFilter::New();
+    fInt->SetInput(meshInt);
+    fInt->SetOutputArrayName("RInt");
+    fInt->SetComponent(0);
+    if (!fInt->Execute()) {
+        std::cout << "FAIL: Int Execute (" << fInt->GetMessage() << ")\n";
+        return false;
+    }
+    auto outInt = iGame::DynamicCast<iGame::UnstructuredMesh>(fInt->GetOutput());
+    if (outInt == nullptr) return false;
+    auto& attrInt = outInt->GetAttributeSet()->GetScalar("RInt");
+    bool intOk = (attrInt.pointer != nullptr) && (attrInt.pointer->GetArrayType() == IG_IntArray);
+    for (IGsize i = 0; intOk && i < attrInt.pointer->GetNumberOfElements(); ++i) {
+        intOk = (attrInt.pointer->GetValue(i) == static_cast<double>(i));
+    }
+    if (!intOk) std::cout << "FAIL: IntArray output type\n";
+    allOk = allOk && intOk;
+
+    // LongLongArray input
+    auto meshLL = iGame::UnstructuredMesh::New();
+    meshLL->AddPoint(iGame::Point(0.f, 0.f, 0.f));
+    meshLL->AddPoint(iGame::Point(1.f, 0.f, 0.f));
+    meshLL->AddPoint(iGame::Point(0.f, 1.f, 0.f));
+    meshLL->AddPoint(iGame::Point(0.f, 0.f, 1.f));
+    meshLL->AddCell(cell, 4, iGame::IG_TETRA);
+    auto vecLL = iGame::LongLongArray::New();
+    vecLL->SetName("vecLL");
+    vecLL->SetDimension(3);
+    for (int i = 0; i < 4; ++i) {
+        long long v[3] = {10LL + i, 20LL + i, 30LL + i};
+        vecLL->AddElement(v);
+    }
+    meshLL->GetAttributeSet()->AddVector(IG_POINT, vecLL);
+
+    auto fLL = iGame::ExtractComponentFilter::New();
+    fLL->SetInput(meshLL);
+    fLL->SetOutputArrayName("RLL");
+    fLL->SetComponent(0);
+    if (!fLL->Execute()) {
+        std::cout << "FAIL: LongLong Execute (" << fLL->GetMessage() << ")\n";
+        return false;
+    }
+    auto outLL = iGame::DynamicCast<iGame::UnstructuredMesh>(fLL->GetOutput());
+    if (outLL == nullptr) return false;
+    auto& attrLL = outLL->GetAttributeSet()->GetScalar("RLL");
+    bool llOk = (attrLL.pointer != nullptr) && (attrLL.pointer->GetArrayType() == IG_LongLongArray);
+    for (IGsize i = 0; llOk && i < attrLL.pointer->GetNumberOfElements(); ++i) {
+        llOk = (attrLL.pointer->GetValue(i) == 10.0 + i);
+    }
+    if (!llOk) std::cout << "FAIL: LongLongArray output type\n";
+    allOk = allOk && llOk;
+
+    return allOk;
+}
+
+// Same-named arrays on PointData and CellData are distinguished by attachment type.
+bool VerifyAttachmentSelection() {
+    auto mesh = CreateMeshWithCellVector();
+    // Add a same-named Point vector ("cellVec" already exists on CellData).
+    auto pv = iGame::FloatArray::New();
+    pv->SetName("cellVec");
+    pv->SetDimension(3);
+    for (int i = 0; i < 5; ++i) {
+        pv->AddElement3(1.f + 3.f * i, 2.f + 3.f * i, 3.f + 3.f * i);
+    }
+    mesh->GetAttributeSet()->AddVector(IG_POINT, pv);
+
+    // Restrict to IG_POINT -> point values 1, 4, 7, 10, 13
+    auto fP = iGame::ExtractComponentFilter::New();
+    fP->SetInput(mesh);
+    fP->SetInputArrayName("cellVec");
+    fP->SetInputAttachmentType(IG_POINT);
+    fP->SetOutputArrayName("RP");
+    fP->SetComponent(0);
+    if (!fP->Execute()) {
+        std::cout << "FAIL: Point Execute (" << fP->GetMessage() << ")\n";
+        return false;
+    }
+    auto outP = iGame::DynamicCast<iGame::UnstructuredMesh>(fP->GetOutput());
+    if (outP == nullptr) return false;
+    auto& attrP = outP->GetAttributeSet()->GetScalar("RP");
+    bool pOk = (attrP.pointer != nullptr) && (attrP.attachmentType == IG_POINT)
+               && (attrP.pointer->GetNumberOfElements() == 5);
+    for (IGsize i = 0; pOk && i < attrP.pointer->GetNumberOfElements(); ++i) {
+        pOk = (attrP.pointer->GetValue(i) == 1.0 + 3.0 * i);
+    }
+    if (!pOk) std::cout << "FAIL: Point attachment selection\n";
+
+    // Restrict to IG_CELL -> cell values 10, 40
+    auto fC = iGame::ExtractComponentFilter::New();
+    fC->SetInput(mesh);
+    fC->SetInputArrayName("cellVec");
+    fC->SetInputAttachmentType(IG_CELL);
+    fC->SetOutputArrayName("RC");
+    fC->SetComponent(0);
+    if (!fC->Execute()) {
+        std::cout << "FAIL: Cell Execute (" << fC->GetMessage() << ")\n";
+        return false;
+    }
+    auto outC = iGame::DynamicCast<iGame::UnstructuredMesh>(fC->GetOutput());
+    if (outC == nullptr) return false;
+    auto& attrC = outC->GetAttributeSet()->GetScalar("RC");
+    bool cOk = (attrC.pointer != nullptr) && (attrC.attachmentType == IG_CELL)
+               && (attrC.pointer->GetNumberOfElements() == 2);
+    if (cOk) {
+        cOk = (attrC.pointer->GetValue(0) == 10.0) && (attrC.pointer->GetValue(1) == 40.0);
+    }
+    if (!cOk) std::cout << "FAIL: Cell attachment selection\n";
+
+    return pOk && cOk;
+}
 }  // namespace
 
 int main(int argc, char* argv[]) {
@@ -468,6 +601,14 @@ int main(int argc, char* argv[]) {
     bool regOk = VerifyExtractOnExtractedResult();
     std::cout << (regOk ? "PASS" : "FAIL") << ": extract on extracted result (regression)\n";
     allOk = allOk && regOk;
+
+    bool typeOk = VerifyOutputTypePreserved();
+    std::cout << (typeOk ? "PASS" : "FAIL") << ": output type preserved (Int/LongLong)\n";
+    allOk = allOk && typeOk;
+
+    bool attachOk = VerifyAttachmentSelection();
+    std::cout << (attachOk ? "PASS" : "FAIL") << ": Point/Cell attachment selection\n";
+    allOk = allOk && attachOk;
 
     return allOk ? 0 : 1;
 }
