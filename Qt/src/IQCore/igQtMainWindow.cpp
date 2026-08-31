@@ -2295,6 +2295,26 @@ void igQtMainWindow::initAllFilters() {
             return;
         }
 
+        const int previousAttributeIndex = input->GetAttributeIndex();
+        CountCellFacesFilter::Pointer filter = CountCellFacesFilter::New();
+        filter->SetInput(input);
+        if (!filter->Execute()) {
+            showDarkFramelessMessage(QStringLiteral("执行失败"),
+                                     QString::fromStdString(filter->GetMessage()));
+            return;
+        }
+
+        modelTreeWidget->updateAllAttriubute(input);
+        if (auto* item = modelTreeWidget->getItemFromObject(input)) {
+            item->setExpanded(true);
+            if (previousAttributeIndex >= 0 && previousAttributeIndex < item->childCount()) {
+                item->viewAttribute(previousAttributeIndex, -1);
+            }
+        }
+        ui->widget_SearchInfo->setCurrentModel(scene->GetCurrentModel());
+        rendererWidget->update();
+    });
+
     // 提取分量 (Extract Component)：从多分量数组（向量/张量）提取单个分量生成标量属性，
     // 打开左侧工具面板（继承语义：首次执行新增模型树节点，再次执行更新结果节点）
     QAction* extractComponent = ui->menu_filters->addAction(QStringLiteral("提取分量 (Extract Component)"));
@@ -2319,27 +2339,6 @@ void igQtMainWindow::initAllFilters() {
             [this](const QString& message) {
                 showDarkFramelessMessage(QStringLiteral("Warning"), message);
             });
-
-    QMenu* view = ui->menu_filters->addMenu("特征提取");
-        const int previousAttributeIndex = input->GetAttributeIndex();
-        CountCellFacesFilter::Pointer filter = CountCellFacesFilter::New();
-        filter->SetInput(input);
-        if (!filter->Execute()) {
-            showDarkFramelessMessage(QStringLiteral("执行失败"),
-                                     QString::fromStdString(filter->GetMessage()));
-            return;
-        }
-
-        modelTreeWidget->updateAllAttriubute(input);
-        if (auto* item = modelTreeWidget->getItemFromObject(input)) {
-            item->setExpanded(true);
-            if (previousAttributeIndex >= 0 && previousAttributeIndex < item->childCount()) {
-                item->viewAttribute(previousAttributeIndex, -1);
-            }
-        }
-        ui->widget_SearchInfo->setCurrentModel(scene->GetCurrentModel());
-        rendererWidget->update();
-    });
 
     QAction* gradient = view->addAction(QStringLiteral("计算梯度 (ComputeGradient)"));
     connect(gradient, &QAction::triggered, this, [this](bool checked) {

@@ -1487,7 +1487,6 @@ QLabel#CustomTitleLabel {
    <widget class="igQtContourExtractWidget" name="widget_ContourExtract"/>
   </widget>
   <widget class="QDockWidget" name="dockWidget_ExtractComponent">
-  <widget class="QDockWidget" name="dockWidget_GenerateProcessIds">
    <property name="minimumSize">
     <size>
      <width>115</width>
@@ -1496,12 +1495,25 @@ QLabel#CustomTitleLabel {
    </property>
    <property name="windowTitle">
     <string>提取分量</string>
-    <string>生成进程ID</string>
    </property>
    <attribute name="dockWidgetArea">
     <number>1</number>
    </attribute>
    <widget class="igQtExtractComponentWidget" name="widget_ExtractComponent"/>
+  </widget>
+  <widget class="QDockWidget" name="dockWidget_GenerateProcessIds">
+   <property name="minimumSize">
+    <size>
+     <width>115</width>
+     <height>55</height>
+    </size>
+   </property>
+   <property name="windowTitle">
+    <string>生成进程ID</string>
+   </property>
+   <attribute name="dockWidgetArea">
+    <number>1</number>
+   </attribute>
    <widget class="igQtGenerateProcessIdsWidget" name="widget_GenerateProcessIds"/>
   </widget>
   <action name="action_SaveMesh">
