@@ -166,9 +166,7 @@ private:
     QDockWidget* m_extractCellsByTypeShell = nullptr;
     igQtExtractCellsByTypeWidget* m_extractCellsByTypeWidget = nullptr;
     iGame::ExtractCellsByTypeFilter::Pointer m_extractCellsByTypeFilter;
-    iGame::Model::Pointer m_extractCellsByTypeModel;
-    std::array<int, static_cast<size_t>(LeftToolPanelId::Count)> m_leftToolTabByPanel{
-            {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1}};
+    iGame::Model::Pointer m_extractCellsByTypeModel;    
 
     void relocateContentToLeftTab(QDockWidget* shell, QWidget* inner, const QString& title, LeftToolPanelId id,
                                   bool centerFlowField);
