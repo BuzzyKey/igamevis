@@ -855,7 +855,7 @@ void igQtMainWindow::initAllUnDefinedComponents() {
     ui->dockWidget_ModelList->setFeatures(QDockWidget::DockWidgetClosable);
     ui->dockWidget_ContourExtract->setFeatures(QDockWidget::DockWidgetClosable);
     ui->dockWidget_ExtractComponent->setFeatures(QDockWidget::DockWidgetClosable);
-    ui->dockWidget_ExtractEdges->setFeatures(QDockWidget::DockWidgetClosable);
+    //ui->dockWidget_ExtractEdges->setFeatures(QDockWidget::DockWidgetClosable);
     ui->dockWidget_CountCellVertices->setFeatures(QDockWidget::DockWidgetClosable);
 
     QDockWidget* dockWidget_null = new QDockWidget("", this);
