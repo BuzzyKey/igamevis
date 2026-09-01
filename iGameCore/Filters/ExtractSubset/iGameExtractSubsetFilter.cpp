@@ -2,70 +2,126 @@
 #include "iGamePoints.h"
 #include "iGameCellArray.h"
 #include "iGameAttributeSet.h"
+#include "Log/iGameLogger.h"
 
+#include <cstring>
 #include <vector>
 
 IGAME_NAMESPACE_BEGIN
 
 namespace {
 
-// 按 VOI 的点/单元索引映射，把输入网格的属性拷贝到输出网格。
-// - 保持原始数组类型 (FloatArray / DoubleArray)、维度 (GetDimension)
-//   以及 DataRange (attr.GetDataRange())，不进行类型转换或重算。
-// - 当某个输出单元对应的输入单元索引越界 (例如 2D 输入网格上做 IK/JK
-//   方向切片时，输入没有 IK/JK 面的单元数据)，跳过该单元以避免越界读。
-void CopyAttributesByVOI(igIndex outPointNum, igIndex outCellNum,
-                         AttributeSet::Pointer inData,
-                         AttributeSet::Pointer outData,
-                         const std::vector<igIndex>& pointMap,
-                         const std::vector<igIndex>& cellMap) {
-    if (inData == nullptr || outData == nullptr) return;
-    auto inAllAttr = inData->GetAllAttributes();
-    if (inAllAttr == nullptr) return;
+ArrayObject::Pointer CreateArrayLike(const ArrayObject::Pointer& inArray) {
+    if (inArray == nullptr) return nullptr;
+    if (DynamicCast<FloatArray>(inArray))         return FloatArray::New();
+    if (DynamicCast<DoubleArray>(inArray))        return DoubleArray::New();
+    if (DynamicCast<IntArray>(inArray))           return IntArray::New();
+    if (DynamicCast<UnsignedIntArray>(inArray))   return UnsignedIntArray::New();
+    if (DynamicCast<LongLongArray>(inArray))      return LongLongArray::New();
+    if (DynamicCast<UnsignedLongLongArray>(inArray)) return UnsignedLongLongArray::New();
+    if (DynamicCast<CharArray>(inArray))          return CharArray::New();
+    if (DynamicCast<UnsignedCharArray>(inArray))  return UnsignedCharArray::New();
+    if (DynamicCast<ShortArray>(inArray))         return ShortArray::New();
+    if (DynamicCast<UnsignedShortArray>(inArray)) return UnsignedShortArray::New();
+    return nullptr;
+}
 
-    double values[IGAME_CELL_MAX_SIZE] = {0};
-    const size_t nAttrs = inAllAttr->GetNumberOfElements();
-    for (size_t ai = 0; ai < nAttrs; ++ai) {
-        // GetDataRange()/GetPointer() 等访问器都是非 const 成员方法，
-        // 因此这里不能用 const 引用，会触发 C2662。
-        auto& attr = inAllAttr->GetElement(ai);
-        if (attr.IsNone() || attr.pointer == nullptr) continue;
-        ArrayObject::Pointer inArray = attr.pointer;
+// 按 VOI 的点索引映射，把输入网格的点属性拷贝到输出网格。
+//   - 保持原始数组类型、维度 (GetDimension) 以及 DataRange。
+//   - 当输出点数为 0 时直接返回。
+// 参考 iGameTensorFilter::UpdateGlyphDrawAttributeSet 的写法。
+void CopyPointAttributesByVOI(igIndex outPointNum,
+                              AttributeSet::Pointer inData,
+                              AttributeSet::Pointer outData,
+                              const std::vector<igIndex>& pointMap) {
+    if (inData == nullptr || outData == nullptr || outPointNum == 0) return;
 
-        // 保持原始数组类型
-        ArrayObject::Pointer outArray;
-        if (DynamicCast<FloatArray>(inArray)) {
-            outArray = FloatArray::New();
-        } else if (DynamicCast<DoubleArray>(inArray)) {
-            outArray = DoubleArray::New();
-        } else {
-            continue; // 不支持的类型，保持原有行为 (不拷贝)
-        }
+    auto inPointAttrs = inData->GetAllPointAttributes();
+    if (inPointAttrs == nullptr) return;
+
+    const size_t nAttrs = inPointAttrs->GetNumberOfElements();
+    for (size_t i = 0; i < nAttrs; ++i) {
+        // Attribute 是 struct，字段为 public；这里使用访问器方法
+        // 避免 const 限定与 C2662 问题，并贴近 TensorFilter 的风格。
+        auto& inAttr = inPointAttrs->GetElement(i);
+        if (inAttr.IsNone()) continue;
+        ArrayObject::Pointer inArray = inAttr.GetPointer();
+        if (inArray == nullptr) continue;
+
+        // 保持原始数组类型；不支持的具体类型则跳过
+        ArrayObject::Pointer outArray = CreateArrayLike(inArray);
+        if (outArray == nullptr) continue;
         outArray->SetName(inArray->GetName());
         outArray->SetDimension(inArray->GetDimension());
+        outArray->Resize(outPointNum);
 
-        if (attr.attachmentType == IG_POINT) {
-            if (outPointNum == 0) continue;
-            outArray->Resize(outPointNum);
-            for (igIndex j = 0; j < outPointNum; ++j) {
-                inArray->GetElement(pointMap[j], values);
-                outArray->SetElement(j, values);
+        // ArrayObject 公共 API 的 GetElement / SetElement 仅暴露
+        // int* / float* / double* 三种重载；FlatArray<T> 内部通过
+        // static_cast 在三种类型与底层 TValue 之间互转，所以用 double
+        // 缓冲即可读 / 写任意具体类型。
+        double values[IGAME_CELL_MAX_SIZE] = {0};
+        const IGsize inNumElems = inArray->GetNumberOfElements();
+        for (igIndex j = 0; j < outPointNum; ++j) {
+            igIndex srcPt = pointMap[j];
+            if (srcPt >= inNumElems) {
+                // 输入无对应点数据：保持 values 已清零的原样写入
+                std::memset(values, 0, sizeof(values));
+            } else {
+                inArray->GetElement(srcPt, values);
             }
-            outData->AddAttribute(attr.type, attr.attachmentType,
-                                  outArray, attr.GetDataRange());
-        } else if (attr.attachmentType == IG_CELL) {
-            if (outCellNum == 0) continue;
-            outArray->Resize(outCellNum);
-            const IGsize inNumElems = inArray->GetNumberOfElements();
-            for (igIndex j = 0; j < outCellNum; ++j) {
-                igIndex srcCell = cellMap[j];
-                if (srcCell >= inNumElems) continue; // 输入无对应单元数据
-                inArray->GetElement(srcCell, values);
-                outArray->SetElement(j, values);
-            }
-            outData->AddAttribute(attr.type, attr.attachmentType,
-                                  outArray, attr.GetDataRange());
+            outArray->SetElement(j, values);
         }
+
+        // 沿用 TensorFilter 的 4 参数版本，保留原始 DataRange
+        outData->AddAttribute(inAttr.GetType(), IG_POINT,
+                              outArray, inAttr.GetDataRange());
+    }
+}
+
+// 按 VOI 的单元索引映射，把输入网格的单元属性拷贝到输出网格。
+//   - 保持原始数组类型、维度 (GetDimension) 以及 DataRange。
+//   - 当输出单元数为 0 (例如 1D 切线) 或 cellMap 为空时直接返回。
+//   - 当某个输出单元对应的输入单元索引越界 (例如 2D 输入网格上做 IK/JK
+//     方向切片时，输入没有 IK/JK 面的单元数据)，跳过该单元以避免越界读。
+// 参考 iGameTensorFilter::UpdateGlyphDrawAttributeSet 的写法。
+void CopyCellAttributesByVOI(igIndex outCellNum,
+                             AttributeSet::Pointer inData,
+                             AttributeSet::Pointer outData,
+                             const std::vector<igIndex>& cellMap) {
+    if (inData == nullptr || outData == nullptr ||
+        outCellNum == 0 || cellMap.empty()) return;
+
+    auto inCellAttrs = inData->GetAllCellAttributes();
+    if (inCellAttrs == nullptr) return;
+
+    const size_t nAttrs = inCellAttrs->GetNumberOfElements();
+    for (size_t i = 0; i < nAttrs; ++i) {
+        auto& inAttr = inCellAttrs->GetElement(i);
+        if (inAttr.IsNone()) continue;
+        ArrayObject::Pointer inArray = inAttr.GetPointer();
+        if (inArray == nullptr) continue;
+
+        ArrayObject::Pointer outArray = CreateArrayLike(inArray);
+        if (outArray == nullptr) continue;
+        outArray->SetName(inArray->GetName());
+        outArray->SetDimension(inArray->GetDimension());
+        outArray->Resize(outCellNum);
+
+        double values[IGAME_CELL_MAX_SIZE] = {0};
+        const IGsize inNumElems = inArray->GetNumberOfElements();
+        for (igIndex j = 0; j < outCellNum; ++j) {
+            igIndex srcCell = cellMap[j];
+            if (srcCell >= inNumElems) {
+                // 输入无对应单元数据：清零后写入
+                std::memset(values, 0, sizeof(values));
+            } else {
+                inArray->GetElement(srcCell, values);
+            }
+            outArray->SetElement(j, values);
+        }
+
+        outData->AddAttribute(inAttr.GetType(), IG_CELL,
+                              outArray, inAttr.GetDataRange());
     }
 }
 
@@ -140,14 +196,14 @@ bool ExtractSubsetFilter::Execute()
     UpdateProgress(0.3);
 
     // ---------- 2) 根据维度方向构建单元 ----------
-    //  - 3D         (newSize[2] > 1)                     : 六面体体 (Volume)
-    //  - 2D IJ 平面 (newSize[2] == 1 && n0,n1 > 1)      : K = minK 层四边形
-    //  - 2D IK 平面 (newSize[1] == 1 && n0,n2 > 1)      : J = minJ 层四边形
-    //  - 2D JK 平面 (newSize[0] == 1 && n1,n2 > 1)      : I = minI 层四边形
+    //  - 3D         (newSize[0,1,2] 均 > 1)            : 六面体体 (Volume)
+    //  - 2D IJ 平面 (newSize[2] == 1 && n0,n1 > 1)    : K = minK 层四边形
+    //  - 2D IK 平面 (newSize[1] == 1 && n0,n2 > 1)    : J = minJ 层四边形
+    //  - 2D JK 平面 (newSize[0] == 1 && n1,n2 > 1)    : I = minI 层四边形
     std::vector<igIndex> cellIndexMap;
     igIndex outCellNum = 0;
 
-    if (newSize[2] > 1) {
+    if (newSize[2] > 1 && newSize[1] > 1 && newSize[0] > 1) {
         // ---------- 3D: 六面体体 ----------
         CellArray::Pointer volumes = CellArray::New();
 
@@ -210,7 +266,11 @@ bool ExtractSubsetFilter::Execute()
         }
 
         m_OutputMesh->SetFaces(faces);
-        m_OutputMesh->BuildStructuredFaces();
+        // 不调用 BuildStructuredFaces():
+        //   1. 我们已按 VOI 手动构造好本分支所需的面；
+        //   2. CellArray::Resize 不清空旧数据；
+        //   3. BuildStructuredFaces() 没有幂等保护，会 Resize 再 AddCellIds
+        //      重新生成全部 3 方向面，导致 2N 个面被重复写入。
         UpdateProgress(0.7);
     } else if (newSize[0] > 1 && newSize[2] > 1) {
         // ---------- 2D IK 面 (J = minJ 层) ----------
@@ -244,7 +304,6 @@ bool ExtractSubsetFilter::Execute()
         }
 
         m_OutputMesh->SetFaces(faces);
-        m_OutputMesh->BuildStructuredFaces();
         UpdateProgress(0.7);
     } else if (newSize[1] > 1 && newSize[2] > 1) {
         // ---------- 2D JK 面 (I = minI 层) ----------
@@ -277,22 +336,37 @@ bool ExtractSubsetFilter::Execute()
         }
 
         m_OutputMesh->SetFaces(faces);
-        m_OutputMesh->BuildStructuredFaces();
+        // 不调用 BuildStructuredFaces():
+        //   1. 我们已按 VOI 手动构造好本分支所需的面；
+        //   2. CellArray::Resize 不清空旧数据；
+        //   3. BuildStructuredFaces() 没有幂等保护，会 Resize 再 AddCellIds
+        //      重新生成全部 3 方向面，导致 2N 个面被重复写入。
         UpdateProgress(0.7);
     }
     // else: newSize 中有维度 <=1 且不构成 2D 平面 (例如 1D 线/单点) —— 不构建单元
 
     UpdateProgress(0.9);
 
-    // ---------- 3) 按 VOI 索引映射拷贝点/单元属性 ----------
+    // ---------- 3) 按 VOI 索引映射拷贝点 / 单元属性 ----------
+    //   参考 iGameTensorFilter::UpdateGlyphDrawAttributeSet 的写法，
+    //   沿用其 GetAllPointAttributes / GetType / GetPointer / GetDataRange
+    //   访问器模式，并对 Cell 属性同步处理。
     AttributeSet::Pointer inAttrSet = m_InputMesh->GetAttributeSet();
+    AttributeSet::Pointer outAttrSet = AttributeSet::New();
+    IGsize copiedPointAttrs = 0;
+    IGsize copiedCellAttrs  = 0;
     if (inAttrSet != nullptr && inAttrSet->GetNumberOfAttributes() > 0) {
-        AttributeSet::Pointer outAttrSet = AttributeSet::New();
-        CopyAttributesByVOI(outPointNum, outCellNum, inAttrSet, outAttrSet,
-                            pointIndexMap, cellIndexMap);
-        if (outAttrSet->GetNumberOfAttributes() > 0) {
-            m_OutputMesh->SetAttributeSet(outAttrSet);
-        }
+        CopyPointAttributesByVOI(outPointNum, inAttrSet, outAttrSet, pointIndexMap);
+        CopyCellAttributesByVOI(outCellNum,  inAttrSet, outAttrSet, cellIndexMap);
+        copiedPointAttrs = outAttrSet->GetAllPointAttributes()
+                                ? outAttrSet->GetAllPointAttributes()->GetNumberOfElements()
+                                : 0;
+        copiedCellAttrs  = outAttrSet->GetAllCellAttributes()
+                                ? outAttrSet->GetAllCellAttributes()->GetNumberOfElements()
+                                : 0;
+    }
+    if (outAttrSet->GetNumberOfAttributes() > 0) {
+        m_OutputMesh->SetAttributeSet(outAttrSet);
     }
 
     UpdateProgress(1.0);
