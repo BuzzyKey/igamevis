@@ -459,7 +459,7 @@ bool VerifyOutputTypePreserved() {
     vecLL->SetName("vecLL");
     vecLL->SetDimension(3);
     for (int i = 0; i < 4; ++i) {
-        long long v[3] = {10LL + i, 20LL + i, 30LL + i};
+        int64_t v[3] = {10LL + i, 20LL + i, 30LL + i};
         vecLL->AddElement(v);
     }
     meshLL->GetAttributeSet()->AddVector(IG_POINT, vecLL);
