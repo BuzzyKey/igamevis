@@ -244,6 +244,7 @@ igame_add_example(testGetPointsInFrustum Filter/Selection/TestGetPointsInFrustum
 igame_add_example(testGetCellsInFrustum Filter/Selection/TestGetCellsInFrustum.cpp)
 
 # Data processing
+igame_add_example(testExtractLocation Filter/DataProcessing/ExtractLocation/TestExtractLocation.cpp)
 igame_add_example(testOverlappingCellsDetector
     Filter/DataProcessing/OverlappingCellsDetector/TestOverlappingCellsDetector.cpp)
 
@@ -295,6 +296,7 @@ igame_add_example(testAnsysRSTReader IO/AnsysRSTReader.cpp)
 igame_add_example(testAnsysRTHReader IO/AnsysRTHReader.cpp)
 
 # Animation / Filters
+igame_add_example(testVolumeOfRevolution Filter/VolumeOfRevolution/TestVolumeOfRevolution.cpp)
 igame_add_example(testPassArray Filter/PassArrays/TestPassArrays.cpp)
 
 igame_add_example(testAnimation Animation/TestAnimation.cpp)
@@ -318,10 +320,17 @@ igame_add_example(testBoundaryMeshQuality Filter/TestBoundaryMeshQuality.cpp)
 # Probe
 igame_add_example(testProbe Filter/Probe/TestProbe.cpp)
 
+# 简单任务 #5 + 中等任务 #28 配套测试用例
+igame_add_example(testCountCellVertices Filter/TestCountCellVertices.cpp)
+igame_add_example(testExtractEdges Filter/TestExtractEdges.cpp)
+
 # Color bar / interaction
 igame_add_example(testChangeColorRange ColorBar/ChangeColorRange.cpp)
 igame_add_example(testChangeColorBar ColorBar/ChangeColorBar.cpp)
 igame_add_example(testMultiscaleInteraction MultiscaleInteraction/TestMultiscaleInteraction.cpp)
+
+# Sources
+igame_add_example(testRandomVectors Filter/AttributeManipulation/TestRandomVectors.cpp)
 
 # Feature extraction
 igame_add_example(testVortexExtraction Filter/FeatureExtraction/VortexExtraction.cpp)
@@ -332,6 +341,9 @@ igame_add_example(testExtractComponent Filter/TestExtractComponent.cpp)
 igame_add_example(testFeatureEdgeRegion Filter/FeatureExtraction/FeatureEdgeRegion.cpp)
 igame_add_example(testOutlineCorners Filter/FeatureExtraction/OutlineCorners.cpp)
 igame_add_example(testCellSizeExtraction Filter/FeatureExtraction/CellSizeExtraction.cpp)
+
+igame_add_example(TestValidateCellsFilter Filter/MyFilter/TestValidateCellsFilter.cpp)
+
 
 # Feature edges console test
 igame_add_example(
@@ -359,6 +371,14 @@ igame_add_example(
     testGenerateGlobalIds
     Filter/GlobalIds/TestGenerateGlobalIds.cpp
 )
+
+# Elevation
+igame_add_example(
+    testElevation
+    Filter/Elevation/TestElevation.cpp
+)
+# AppendReduce
+igame_add_example(testAppendReduce Filter/TestAppendReduce.cpp)
 
 get_property(IGAME_EXAMPLE_TARGETS DIRECTORY PROPERTY IGAME_EXAMPLE_TARGETS)
 if (NOT IGAME_EXAMPLE_TARGETS)
