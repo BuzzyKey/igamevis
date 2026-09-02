@@ -48,6 +48,7 @@
 #include "FeatureExtraction/iGameOutlineCornerFilter.h"
 #include "FeatureExtraction/iGameVortexDetectionFilter.h"
 #include "FeatureExtraction/iGameVortexFilter.h"
+#include "ExtractSubset/iGameExtractSubsetFilter.h"
 #include "VolumeOfRevolution/iGameVolumeOfRevolutionFilter.h"
 #include "Elevation/iGameElevationFilter.h"
 #include "FeatureExtraction/iGameFeatureEdgeRegionFilter.h"

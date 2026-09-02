@@ -380,6 +380,11 @@ igame_add_example(
     Filter/GlobalIds/TestGenerateGlobalIds.cpp
 )
 
+# Extract Subset
+igame_add_example(
+    testExtractSubset
+    Filter/TestExtractSubset.cpp
+)
 # Elevation
 igame_add_example(
     testElevation
