@@ -6,6 +6,9 @@
 #include "Convert/iGameConvertToPointCloudFilter.h"
 #include "Convert/iGameConvertToSurfaceMeshFilter.h"
 #include "Convert/iGameConvertToVolumeMeshFilter.h"
+
+#include "RemoveGhostInformation/iGameRemoveGhostInformationFilter.h"
+
 #include "CountCellVertices/iGameCountCellVerticesFilter.h"
 #include "ExportEdges/iGameExportEdgesFilter.h"
 #include "ExtractEdges/iGameExtractEdgesFilter.h"

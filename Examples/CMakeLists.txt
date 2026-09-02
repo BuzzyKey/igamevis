@@ -234,6 +234,9 @@ igame_add_example(testVariableCorrelationData Filter/VisualizationData/TestVaria
 igame_add_example(testVariableDensityData Filter/VisualizationData/TestVariableDensityData.cpp)
 igame_add_example(testPlotLineData Filter/VisualizationData/TestPlotLineData.cpp)
 
+# RemoveGhostInformation
+igame_add_example(testRemoveGhostInformation Filter/RemoveGhostInformation/TestRemoveGhostInformation.cpp)
+
 # Selection
 igame_add_example(testSetSelectionCallBack Filter/Selection/TestSetSelectionCallBack.cpp)
 igame_add_example(testSetClearSelectionCallBackFunc Filter/Selection/TestSetClearSelectionCallBackFunc.cpp)

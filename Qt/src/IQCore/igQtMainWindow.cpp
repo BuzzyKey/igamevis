@@ -1754,6 +1754,52 @@ void igQtMainWindow::initAllFilters() {
     });
     QMenu* mesh_processing = ui->menu_filters->addMenu(QStringLiteral("数据处理 (Data Processing)"));
 
+    connect(ui->menu_filters->addAction(QStringLiteral("移除Ghost信息 (Remove Ghost Information)")),
+            &QAction::triggered, this, [&](bool checked) {
+                if (rendererWidget->GetScene()->GetCurrentModel() == nullptr) return;
+
+                igQtFilterDialogDockWidget* dialog = new igQtFilterDialogDockWidget(this, true);
+                dialog->setFilterTitle(QStringLiteral("移除Ghost信息"));
+                dialog->show();
+
+                dialog->setApplyFunctor([=, this]() {
+                    auto obj = rendererWidget->GetScene()->GetCurrentModel()->GetDataObject();
+
+                    RemoveGhostInformationFilter::Pointer filter = RemoveGhostInformationFilter::New();
+
+                    filter->SetInput(obj);
+
+                    if (!filter->Execute()) {
+                        showDarkFramelessMessage(QStringLiteral("执行出错"),
+                                                 QStringLiteral("当前数据不支持移除Ghost信息"));
+                        dialog->close();
+                        return;
+                    }
+
+                    if (!filter->WasModified()) {
+                        showDarkFramelessMessage(QStringLiteral("提示"), QStringLiteral("未发现 Ghost 信息"));
+                        dialog->close();
+                        return;
+                    }
+
+                    auto outObj = filter->GetOutput();
+
+                    if (outObj == nullptr) {
+                        showDarkFramelessMessage(QStringLiteral("执行出错"), QStringLiteral("未生成有效输出结果"));
+                        dialog->close();
+                        return;
+                    }
+
+                    outObj->SetName(obj->GetName() + "_RemoveGhost");
+
+                    modelTreeWidget->addDataObjectToModelTree(outObj, Algorithm);
+                    rendererWidget->update();
+
+                    dialog->close();
+                });
+            });
+
+    connect(mesh_processing->addAction(QStringLiteral("表面网格简化 (Surface Simplification)")), &QAction::triggered, this, [&](bool checked) {
     QAction* shrinkAction = ui->menu_filters->addAction(QStringLiteral("单元收缩 (Shrink)"));
     connect(shrinkAction, &QAction::triggered, this, [this](bool checked) {
         if (rendererWidget->GetScene()->GetCurrentModel() == nullptr) return;
