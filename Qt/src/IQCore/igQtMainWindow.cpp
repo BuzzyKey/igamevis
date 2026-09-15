@@ -3898,8 +3898,39 @@ void igQtMainWindow::initAllFilters() {
     bindDevelopmentAction("cell_mesh_metrics", [executeDevelopmentFilter]() {
         executeDevelopmentFilter(QStringLiteral("单元网格指标"), CellMeshMetricsFilter::New());
     });
-    bindDevelopmentAction("multiblock_surface_as_multiblock", [executeDevelopmentFilter]() {
-        executeDevelopmentFilter(QStringLiteral("多块模型表面提取"), MultiBlockGeometryFilter::New());
+    // 多块表面提取：升级自分支增强逻辑（输入校验 + 失败块汇总），入口复用开发菜单中的既有多块项。
+    bindDevelopmentAction("multiblock_surface_as_multiblock",
+                          [this, currentFilterInput, refreshFilterResult]() {
+        const QString title = QStringLiteral("多块模型表面提取");
+        auto input = currentFilterInput(title);
+        if (!input) return;
+
+        auto multiBlockFilter = MultiBlockGeometryFilter::New();
+        multiBlockFilter->SetInput(input);
+        if (!multiBlockFilter->Execute()) {
+            QString errorMsg = QString::fromStdString(multiBlockFilter->GetMessage());
+            if (errorMsg.isEmpty()) { errorMsg = QStringLiteral("多块模型表面提取失败。"); }
+            showDarkFramelessMessage(title, errorMsg);
+            return;
+        }
+
+        auto multiBlockObj = multiBlockFilter->GetOutput();
+        if (multiBlockObj) {
+            multiBlockObj->SetName(input->GetName() + "_MultiBlockSurface");
+        }
+        refreshFilterResult(input, multiBlockObj, title);
+
+        // 子构件层面的异常信息汇总展示（避免静默丢块）
+        const auto& failedBlocks = multiBlockFilter->GetFailedBlocks();
+        if (!failedBlocks.empty()) {
+            QString warningMsg = QStringLiteral("多块表面提取已完成，但以下 %1 个子构件处理异常（已为您原样保留）：\n")
+                                     .arg(failedBlocks.size());
+            for (const auto& block : failedBlocks) {
+                warningMsg += QStringLiteral("• [%1]: %2\n")
+                                  .arg(QString::fromStdString(block.path), QString::fromStdString(block.reason));
+            }
+            showDarkFramelessMessage(QStringLiteral("部分子构件提示"), warningMsg);
+        }
     });
     bindDevelopmentAction("extract_location", [this]() {
         auto model = rendererWidget->GetScene()->GetCurrentModel();
