@@ -16,7 +16,12 @@ IGsize PointSet::GetNumberOfPoints() { return m_Points ? m_Points->GetNumberOfPo
 
 const Point& PointSet::GetPoint(const IGsize ptId) const { return m_Points->GetPoint(ptId); }
 
-void PointSet::SetPoint(const IGsize ptId, const Point& p) { m_Points->SetPoint(ptId, p); }
+void PointSet::SetPoint(const IGsize ptId, const Point& p) {
+    m_Points->SetPoint(ptId, p);
+    // PointSet 自身也必须失效，确保交互修改会重建渲染缓存。
+    this->Modified();
+    this->ForceReConvertToDrawableData();
+}
 
 IGsize PointSet::AddPoint(const Point& p) {
     if (!InEditStatus()) { RequestEditStatus(); }
@@ -115,6 +120,18 @@ void PointSet::ConvertToDrawableData() {
             if (!attr.isDeleted && attr.attachmentType == IG_POINT) {
                 m_ColorWithCell = false;
                 this->SetAttributeWithPointData(attr.pointer, attr.GetDataRange(), m_AttributeDimension);
+            } else if (!attr.isDeleted && attr.attachmentType == IG_CELL) {
+                // 单元属性：由子类展开为可着色的单元几何（SurfaceMesh/VolumeMesh/UnstructuredMesh/
+                // StructuredMesh 都已实现，基类 PointSet 本身没有单元信息）。展开前先清零单元顶点数，
+                // 避免复用上一帧的过期几何；若最终没有生成任何单元几何，则退回默认颜色——否则
+                // m_ColorWithCell 与实际几何不匹配，Model::Draw 会去画空的 m_CellVAO（模型消失），
+                // 或让着色器落到 inputColor 的默认纯白上。
+                m_CellPositionSize = 0;
+                this->SetAttributeWithCellData(attr.pointer, attr.GetDataRange(), m_AttributeDimension);
+                m_ColorWithCell = m_CellPositionSize > 0;
+                if (!m_ColorWithCell) {
+                    m_UseColor = false;
+                }
             }
         }
     }
