@@ -3673,6 +3673,21 @@ void igQtMainWindow::initAllFilters() {
     // 第二批开发入口与第一批并列，后续新增 filter 可添加到此菜单。
     QMenu* developingFiltersBatch2 = ui->menu_filters->addMenu(QStringLiteral("开发中filter/第二批"));
     developingFiltersBatch2->setObjectName(QStringLiteral("menu_developing_filters_batch2"));
+    // 第二批：本仓库自有的两个面板（重采样至数据集 / 重命名数组）。
+    // 复用「标准滤波器」的面板基建（igQtFilterDialogDockWidget + filterPanel<>），
+    // 入口只放在第二批菜单，避免与第一批重复。
+    {
+        QAction* batch2ResampleWithDataSet = developingFiltersBatch2->addAction(
+                QStringLiteral("重采样至数据集(ResampleWithDataSet)"));
+        batch2ResampleWithDataSet->setData(QStringLiteral("resample_with_dataset"));
+        connectImportedFilterAction(batch2ResampleWithDataSet, QStringLiteral("resample_with_dataset"));
+
+        QAction* batch2RenameArrays = developingFiltersBatch2->addAction(
+                QStringLiteral("重命名数组(RenameArrays)"));
+        batch2RenameArrays->setData(QStringLiteral("rename_arrays"));
+        connectImportedFilterAction(batch2RenameArrays, QStringLiteral("rename_arrays"));
+    }
+
     auto addDevelopmentAction = [this](QMenu* menu, QAction* approved, const QString& label) {
         if (!approved) return;
         QAction* action = menu->addAction(label);
@@ -3729,8 +3744,6 @@ void igQtMainWindow::initAllFilters() {
         {"point_volume_interpolator", "点体积插值 (Point Volume Interpolator)"},
         {"angular_periodic", "角度周期复制 (Angular Periodic)"},
         {"resample_to_line", "重采样至直线(ResampleToLine)"},
-        {"resample_with_dataset", "重采样至数据集(ResampleWithDataSet)"},
-        {"rename_arrays", "重命名数组(RenameArrays)"},
         {"point_set_to_octree_image", "点集转八叉树图像 (PointSetToOctree)"},
         {"resample_to_image", "重采样到图像 (ResampleToImage)"},
         {"random_attributes", "随机属性生成 (Random Attributes)"},
