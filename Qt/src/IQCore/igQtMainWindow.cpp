@@ -68,6 +68,12 @@
 #include "Interactor/iGameInteractor.h"
 
 #include "CellCenter/iGameCellCenterFilter.h"
+#include "PointLineInterpolator/iGamePointLineInterpolatorFilter.h"
+#include "FeatureExtraction/iGameCountCellFacesFilter.h"
+#include "FeatureExtraction/iGameGradientFilter.h"
+#include "BoundaryMeshQuality/iGameBoundaryMeshQualityFilter.h"
+#include "FeatureExtraction/iGameFeatureEdgeRegionFilter.h"
+#include "AppendLocationAttribute/iGameAppendLocationAttribute.h"
 #include "MyFilter/iGameCleanToGridFilter.h"
 
 #include "Interactor/iGameInteractor.h"
@@ -98,6 +104,7 @@
 #include <IQWidgets/igQtLinearExtrusionWidget.h>
 #include <IQWidgets/igQtMergeVectorComponentsWidget.h>
 #include <IQWidgets/igQtModelClipWidget.h>
+#include <IQWidgets/igQtExtractComponentWidget.h>
 #include <IQWidgets/igQtModelDrawWidget.h>
 #include <IQWidgets/igQtModelInformationWidget.h>
 #include <IQWidgets/igQtParallelCoordinatesWidget.h>
@@ -3491,6 +3498,8 @@ void igQtMainWindow::initAllFilters() {
     // 使用代理 QAction 避免改动标准菜单中 QAction 的文字、位置或连接。
     QMenu* developingFilters = ui->menu_filters->addMenu(QStringLiteral("开发中filter"));
     developingFilters->setObjectName(QStringLiteral("menu_developing_filters"));
+    QMenu* developingFiltersBatch2 = ui->menu_filters->addMenu(QStringLiteral("开发中filter/第二批"));
+    developingFiltersBatch2->setObjectName(QStringLiteral("menu_developing_filters_batch2"));
     connect(developingFilters->addAction(QStringLiteral("平面插值采样 (Plane Sampling)")), &QAction::triggered, this,
             [this](bool) {
                 auto currentModel = rendererWidget->GetScene()->GetCurrentModel();
@@ -4354,8 +4363,8 @@ void igQtMainWindow::initAllFilters() {
                 });
             });
 
-    QMenu* convert = ui->menu_filters->addMenu(QStringLiteral("数据转换 (Convert)"));
-    connect(convert->addAction(QStringLiteral("转换为点数据 (Convert To PointData)")), &QAction::triggered, this,
+    QMenu* legacyConvert = ui->menu_filters->addMenu(QStringLiteral("数据转换 (Convert)"));
+    connect(legacyConvert->addAction(QStringLiteral("转换为点数据 (Convert To PointData)")), &QAction::triggered, this,
             [&](bool checked) {
                 if (rendererWidget->GetScene()->GetCurrentModel() == nullptr) return;
                 auto obj = rendererWidget->GetScene()->GetCurrentModel()->GetDataObject();
@@ -4366,7 +4375,7 @@ void igQtMainWindow::initAllFilters() {
                     rendererWidget->update();
                 }
             });
-    connect(convert->addAction(QStringLiteral("转换为单元数据 (Convert To CellData)")), &QAction::triggered, this,
+    connect(legacyConvert->addAction(QStringLiteral("转换为单元数据 (Convert To CellData)")), &QAction::triggered, this,
             [&](bool checked) {
                 if (rendererWidget->GetScene()->GetCurrentModel() == nullptr) return;
                 auto obj = rendererWidget->GetScene()->GetCurrentModel()->GetDataObject();
@@ -4415,9 +4424,9 @@ void igQtMainWindow::initAllFilters() {
                 rendererWidget->update();
             });
 
-    QMenu* view = ui->menu_filters->addMenu("特征提取");
+    QMenu* legacyView = ui->menu_filters->addMenu("特征提取");
 
-    QAction* outlineCorners = view->addAction(QStringLiteral("提取包围盒角点 (Outline Corners)"));
+    QAction* outlineCorners = legacyView->addAction(QStringLiteral("提取包围盒角点 (Outline Corners)"));
     connect(outlineCorners, &QAction::triggered, this, [this](bool) {
         auto scene = rendererWidget->GetScene();
         if (scene == nullptr || scene->GetCurrentModel() == nullptr) {
@@ -4558,7 +4567,7 @@ void igQtMainWindow::initAllFilters() {
     //    });
 
 
-    QAction* countCellFaces = view->addAction(QStringLiteral("统计单元面数 (Count Cell Faces)"));
+    QAction* countCellFaces = legacyView->addAction(QStringLiteral("统计单元面数 (Count Cell Faces)"));
     connect(countCellFaces, &QAction::triggered, this, [this](bool) {
         auto scene = rendererWidget->GetScene();
         if (scene == nullptr || scene->GetCurrentModel() == nullptr) {
@@ -5027,8 +5036,8 @@ void igQtMainWindow::initAllFilters() {
     });
 
 
-    QAction* gradient = view->addAction(QStringLiteral("计算梯度 (ComputeGradient)"));
-    connect(gradient, &QAction::triggered, this, [this](bool checked) {
+    QAction* developingGradient = legacyView->addAction(QStringLiteral("计算梯度 (ComputeGradient)"));
+    connect(developingGradient, &QAction::triggered, this, [this](bool checked) {
         if (rendererWidget->GetScene()->GetCurrentModel() == nullptr) return;
         GradientFilter::Pointer filter = GradientFilter::New();
         auto data = rendererWidget->GetScene()->GetCurrentModel()->GetDataObject();
@@ -5058,8 +5067,8 @@ void igQtMainWindow::initAllFilters() {
         }
     });
 
-    QAction* laplacian = view->addAction(QStringLiteral("计算拉普拉斯 (ComputeLaplacian)"));
-    connect(laplacian, &QAction::triggered, this, [this](bool checked) {
+    QAction* developingLaplacian = legacyView->addAction(QStringLiteral("计算拉普拉斯 (ComputeLaplacian)"));
+    connect(developingLaplacian, &QAction::triggered, this, [this](bool checked) {
         if (rendererWidget->GetScene()->GetCurrentModel() == nullptr) return;
         LaplacianFilter::Pointer filter = LaplacianFilter::New();
         auto data = rendererWidget->GetScene()->GetCurrentModel()->GetDataObject();
@@ -5089,8 +5098,8 @@ void igQtMainWindow::initAllFilters() {
         }
     });
 
-    QAction* curvature = view->addAction(QStringLiteral("计算曲率 (ComputeCurvature)"));
-    connect(curvature, &QAction::triggered, this, [this](bool checked) {
+    QAction* developingCurvature = legacyView->addAction(QStringLiteral("计算曲率 (ComputeCurvature)"));
+    connect(developingCurvature, &QAction::triggered, this, [this](bool checked) {
         if (rendererWidget->GetScene()->GetCurrentModel() == nullptr) return;
         CurvatureFilter::Pointer filter = CurvatureFilter::New();
         auto data = rendererWidget->GetScene()->GetCurrentModel()->GetDataObject();
@@ -5165,8 +5174,8 @@ void igQtMainWindow::initAllFilters() {
         }
     });
 
-    QAction* vortex = view->addAction(QStringLiteral("计算涡量 (ComputeVorticity)"));
-    connect(vortex, &QAction::triggered, this, [this](bool checked) {
+    QAction* developingVortex = legacyView->addAction(QStringLiteral("计算涡量 (ComputeVorticity)"));
+    connect(developingVortex, &QAction::triggered, this, [this](bool checked) {
         if (rendererWidget->GetScene()->GetCurrentModel() == nullptr) return;
         auto data = rendererWidget->GetScene()->GetCurrentModel()->GetDataObject();
         int index = data->GetAttributeIndex();
@@ -5320,8 +5329,8 @@ void igQtMainWindow::initAllFilters() {
             });
 
 
-    QAction* vortexPrection = view->addAction(QStringLiteral("涡旋预测 (PredictVortex)"));
-    connect(vortexPrection, &QAction::triggered, this, [this](bool checked) {
+    QAction* developingVortexPrection = legacyView->addAction(QStringLiteral("涡旋预测 (PredictVortex)"));
+    connect(developingVortexPrection, &QAction::triggered, this, [this](bool checked) {
         if (rendererWidget->GetScene()->GetCurrentModel() == nullptr) return;
         VortexDetection::Pointer filter = VortexDetection::New();
         auto data = rendererWidget->GetScene()->GetCurrentModel()->GetDataObject();
@@ -5432,9 +5441,9 @@ void igQtMainWindow::initAllFilters() {
         }
     });
 
-    QAction* lagrangeUnstructedMesh_visualization = ui->menu_filters->addAction(
+    QAction* developingLagrangeUnstructedMesh_visualization = ui->menu_filters->addAction(
             QStringLiteral("拉格朗日非结构网格可视化 (LagrangeUnstructedMesh Visualization)"));
-    connect(lagrangeUnstructedMesh_visualization, &QAction::triggered, this, [&](bool checked) {
+    connect(developingLagrangeUnstructedMesh_visualization, &QAction::triggered, this, [&](bool checked) {
         if (rendererWidget->GetScene()->GetCurrentModel() == nullptr) return;
         ConvertToLagrangeUnstructuredMeshFilter::Pointer filter = ConvertToLagrangeUnstructuredMeshFilter::New();
         auto data = rendererWidget->GetScene()->GetCurrentModel()->GetDataObject();
@@ -5798,10 +5807,6 @@ void igQtMainWindow::initAllFilters() {
             }
         }
     });
-
-    // 第二批开发入口与第一批并列，后续新增 filter 可添加到此菜单。
-    QMenu* developingFiltersBatch2 = ui->menu_filters->addMenu(QStringLiteral("开发中filter/第二批"));
-    developingFiltersBatch2->setObjectName(QStringLiteral("menu_developing_filters_batch2"));
 
     // ===== 封闭点提取 (Extract Enclosed Points) =====
     QAction* extractEnclosedPoints =
@@ -6876,13 +6881,13 @@ void igQtMainWindow::initAllFilters() {
     });
 
     QMenu* developingConvert = developingFilters->addMenu(QStringLiteral("数据转换 (Convert)"));
-    addDevelopmentAction(developingConvert, approvedMenuAction(convert,
+    addDevelopmentAction(developingConvert, approvedMenuAction(legacyConvert,
             QStringLiteral("Convert To Point Data（转换为点数据）")),
             QStringLiteral("转换为点数据 (Convert To PointData)"));
-    addDevelopmentAction(developingConvert, approvedMenuAction(convert,
+    addDevelopmentAction(developingConvert, approvedMenuAction(legacyConvert,
             QStringLiteral("Convert To Cell Data（转换为单元数据）")),
             QStringLiteral("转换为单元数据 (Convert To CellData)"));
-    addDevelopmentAction(developingConvert, lagrangeUnstructedMesh_visualization,
+    addDevelopmentAction(developingConvert, developingLagrangeUnstructedMesh_visualization,
             QStringLiteral("拉格朗日非结构网格可视化 (LagrangeUnstructedMesh Visualization)"));
 
     QMenu* developingView = developingFilters->addMenu(QStringLiteral("特征提取"));
@@ -6890,11 +6895,11 @@ void igQtMainWindow::initAllFilters() {
             QStringLiteral("提取包围盒角点 (Outline Corners)"));
     addDevelopmentAction(developingView, approvedFilter("count_cell_faces"),
             QStringLiteral("统计单元面数 (Count Cell Faces)"));
-    addDevelopmentAction(developingView, gradient, QStringLiteral("计算梯度 (ComputeGradient)"));
-    addDevelopmentAction(developingView, laplacian, QStringLiteral("计算拉普拉斯 (ComputeLaplacian)"));
-    addDevelopmentAction(developingView, curvature, QStringLiteral("计算曲率 (ComputeCurvature)"));
-    addDevelopmentAction(developingView, vortex, QStringLiteral("计算涡量 (ComputeVorticity)"));
-    addDevelopmentAction(developingView, vortexPrection, QStringLiteral("涡旋预测 (PredictVortex)"));
+    addDevelopmentAction(developingView, developingGradient, QStringLiteral("计算梯度 (ComputeGradient)"));
+    addDevelopmentAction(developingView, developingLaplacian, QStringLiteral("计算拉普拉斯 (ComputeLaplacian)"));
+    addDevelopmentAction(developingView, developingCurvature, QStringLiteral("计算曲率 (ComputeCurvature)"));
+    addDevelopmentAction(developingView, developingVortex, QStringLiteral("计算涡量 (ComputeVorticity)"));
+    addDevelopmentAction(developingView, developingVortexPrection, QStringLiteral("涡旋预测 (PredictVortex)"));
 
     QMenu* developingAttributes = developingFilters->addMenu(QStringLiteral("数据属性操作 (Attribute Manipulation)"));
     addDevelopmentAction(developingAttributes, approvedFilter("random_vectors"),
