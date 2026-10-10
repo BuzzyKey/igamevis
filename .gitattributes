@@ -13,3 +13,7 @@ Examples/Models/ExtractLocationTetraPair.vtk -filter -diff -merge text
 Examples/Models/ExtractLocationConnectedSteppedSolid.vtk -filter -diff -merge text
 Examples/Models/OverlappingCellsDetectorValidation.vtk -filter -diff -merge text
 Examples/Models/OverlappingCellsDetectorFaceTouching.vtk -filter -diff -merge text
+# Small text fixtures for the MultiBlockGeometry filter regression sample.
+Examples/Models/assembly_cube_hex.vtk -filter -diff -merge text
+Examples/Models/assembly_empty_error.vtk -filter -diff -merge text
+Examples/Models/assembly_wedge_prism.vtk -filter -diff -merge text
