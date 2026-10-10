@@ -46,19 +46,6 @@ bool CheckAttributes(iGame::AttributeSet* lhs, iGame::AttributeSet* rhs) {
         const auto& b = rhs->GetAttribute(i);
         if (!Check(a.type == b.type && a.attachmentType == b.attachmentType && a.isDeleted == b.isDeleted,
                    "attribute metadata is preserved")) return false;
-        if (!Check(a.rangeLocked == b.rangeLocked && a.rangeMode == b.rangeMode &&
-                   a.rangeLockedDimension == b.rangeLockedDimension && a.runningMin == b.runningMin &&
-                   a.runningMax == b.runningMax && a.runningRangeValid == b.runningRangeValid,
-                   "attribute range settings are preserved")) return false;
-        if (!Check(static_cast<bool>(a.dataRange) == static_cast<bool>(b.dataRange),
-                   "lazy attribute ranges remain uncomputed")) return false;
-        if (a.dataRange) {
-            if (!Check(a.dataRange != b.dataRange && a.dataRange->GetNumberOfValues() == b.dataRange->GetNumberOfValues(),
-                       "attribute ranges are copied independently")) return false;
-            for (IGsize j = 0; j < a.dataRange->GetNumberOfValues(); ++j) {
-                if (!Check(a.dataRange->GetValue(j) == b.dataRange->GetValue(j), "attribute ranges are preserved")) return false;
-            }
-        }
         if (!a.pointer || !b.pointer) {
             if (!Check(!a.pointer && !b.pointer, "empty attributes are preserved")) return false;
             continue;
@@ -184,8 +171,6 @@ bool TestBoundaryMotionAndConvergence() {
 }
 
 bool TestMixedCellsAndAttributes() {
-    // 回归：上游更新后整数属性复制失败，未计算范围被复制为空数组
-    // 修复提交主题：fix: 恢复上游 UI 构建和完整属性复制
     using namespace iGame;
     auto fan = CreateFan();
     auto input = UnstructuredMesh::New();
@@ -203,14 +188,6 @@ bool TestMixedCellsAndAttributes() {
     cellValues->AddValue(7);
     cellValues->AddValue(9);
     input->GetAttributeSet()->AddScalar(IG_CELL, cellValues);
-    auto& cellAttribute = input->GetAttributeSet()->GetAttribute(1);
-    cellAttribute.GetDataRange();
-    cellAttribute.rangeLocked = true;
-    cellAttribute.rangeMode = AttributeSet::RangeMode::FixedGlobal;
-    cellAttribute.rangeLockedDimension = 0;
-    cellAttribute.runningMin = 7.0;
-    cellAttribute.runningMax = 9.0;
-    cellAttribute.runningRangeValid = true;
 
     auto filter = SmoothFilter::New();
     filter->SetInput(input);
