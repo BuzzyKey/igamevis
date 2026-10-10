@@ -577,6 +577,7 @@ igame_add_example(testDeformationCode Filter/Deformation/TestStressDeformationFi
 igame_add_example(testContourLine Filter/TestContourLine.cpp)
 igame_add_example(testGhostCellModel Filter/GhostCell/TestGhostCellModel.cpp)
 igame_add_example(testPlaneSamplingFilter Filter/TestPlaneSampling.cpp)
+igame_add_example(testExtractEnclosedPoints Filter/TestExtractEnclosedPoints.cpp)
 
 #        #5 +  е      #28    ײ       
 igame_add_example(testContourExtraction Filter/TestContourExtraction.cpp)
@@ -667,6 +668,9 @@ igame_add_example(testSurfaceNormalsFilter Filter/SurfaceNormals/TestSurfaceNorm
 igame_add_example(testVolumeMeshSimplification Filter/TestVolumeMeshSimplification.cpp)
 igame_add_example(testMeshTetrahedralize Filter/TestMeshTetrahedralize.cpp)
 
+# Warp By Scalar: displaces points along a normal by a point scalar array.
+igame_add_example(testWarpByScalar Filter/WarpByScalar/TestWarpByScalar.cpp)
+
 # First-batch standard filter examples (Elevation is registered above).
 igame_add_example(testPointCoordinates Filter/PointCoordinates/TestPointCoordinates.cpp)
 igame_add_example(testCellCenterFilter Filter/CellCenter/TestCellCenterFilter.cpp)
@@ -689,6 +693,9 @@ igame_add_example(testExtractLocationDrag Filter/DataProcessing/ExtractLocation/
 
 # Force Static Mesh: cached geometry (pinned to the frame that built the cache) + attribute updates.
 igame_add_example(testForceStaticMesh Filter/ForceStaticMesh/TestForceStaticMesh.cpp)
+
+# Append Attributes: merges point/cell attribute arrays from several inputs sharing the same layout.
+igame_add_example(testAppendAttributes Filter/AppendAttributes/TestAppendAttributes.cpp)
 
 # Cylinder texture mapping
 igame_add_example(testTextureMapToCylinder Filter/TestTextureMapToCylinder.cpp)
