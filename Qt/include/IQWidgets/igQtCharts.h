@@ -15,6 +15,7 @@
 #include <QPushButton>
 #include <QResizeEvent>
 #include "iGameArrayObject.h"
+#include <vector>
 QT_CHARTS_USE_NAMESPACE
 
 class igQtCharts : public QDialog {
@@ -24,6 +25,8 @@ public:
     igQtCharts(QWidget* parent = nullptr);
     void drawBarChart(iGame::ArrayObject::Pointer m_data);
     void drawLineChart(iGame::ArrayObject::Pointer m_data);
+    void drawLineChart(iGame::ArrayObject::Pointer data, const std::vector<double>& xValues,
+                       int component, const QString& xAxisTitle);
     QChartView* getChartView() const;
 
 protected:
@@ -31,9 +34,11 @@ protected:
     void mouseMoveEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
+    void changeEvent(QEvent* e) override;
 
 private:
     void updateRoundedMask();
+    void applyTheme();
 
     QChart* chart;
     QChartView* chartView;

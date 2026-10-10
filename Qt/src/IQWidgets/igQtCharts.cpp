@@ -1,10 +1,12 @@
 #include "IQWidgets/igQtCharts.h"
+#include <IQWidgets/igQtRenderWidget.h>
 #include <QLineSeries>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QBrush>
 #include <QBitmap>
 #include <QColor>
+#include <QEvent>
 #include <QFrame>
 #include <QMouseEvent>
 #include <QPainter>
@@ -67,6 +69,8 @@ igQtCharts::igQtCharts(QWidget* parent)
     chart->setBackgroundPen(Qt::NoPen);
 
     this->setLayout(layout);
+    igQtPanelTheme::attachDeep(this);
+    applyTheme();
     updateRoundedMask();
 }
 
@@ -153,39 +157,19 @@ void igQtCharts::drawBarChart(iGame::ArrayObject::Pointer data) {
     chart->addAxis(axisY, Qt::AlignLeft);
     series->attachAxis(axisY);
 
-    // 添加网格线
     QLineSeries* lineSeries = new QLineSeries();
     for (int i = 0; i <= numberOfBins; ++i) { lineSeries->append(i, 0); }
-    QPen pen(QColor(255, 255, 255, 70));
+    QPen pen(igQtRenderWidget::uiRole(igQtRenderWidget::UiRole::Border));
+    pen.setWidthF(1.0);
     lineSeries->setPen(pen);
     chart->addSeries(lineSeries);
     lineSeries->attachAxis(axisX);
     lineSeries->attachAxis(axisY);
 
-    // 深色主题样式
-    chart->setBackgroundVisible(true);
-    chart->setBackgroundBrush(QBrush(QColor("#1F1F1F")));
-    chart->setBackgroundPen(Qt::NoPen);
-    chart->setBackgroundRoundness(0);
-    chart->setPlotAreaBackgroundVisible(true);
-    chart->setPlotAreaBackgroundBrush(QBrush(QColor("#252526")));
-    chart->setPlotAreaBackgroundPen(Qt::NoPen);
-    chart->setTitleBrush(QBrush(QColor("#E0E0E0")));
-
-    axisX->setLabelsColor(QColor("#C8C8C8"));
-    axisX->setTitleBrush(QBrush(QColor("#C8C8C8")));
-    axisX->setGridLineColor(QColor(255, 255, 255, 35));
-    axisX->setLinePenColor(QColor("#6A6A6A"));
-
-    axisY->setLabelsColor(QColor("#C8C8C8"));
-    axisY->setTitleBrush(QBrush(QColor("#C8C8C8")));
-    axisY->setGridLineColor(QColor(255, 255, 255, 35));
-    axisY->setLinePenColor(QColor("#6A6A6A"));
-
+    chart->setTitle(QStringLiteral("数据分布直方图"));
     chart->legend()->setVisible(true);
     chart->legend()->setAlignment(Qt::AlignTop);
-    chart->legend()->setLabelColor(QColor("#D0D0D0"));
-    chart->setTitle(QStringLiteral("数据分布直方图"));
+    applyTheme();
 }
 
 
@@ -233,6 +217,8 @@ void igQtCharts::drawLineChart(iGame::ArrayObject::Pointer m_data) {
     // 设置图表的标题
     chart->setTitle(QStringLiteral("数据折线图"));
 
+    applyTheme();
+
     // 更新图表视图
     chartView->setChart(chart);
 }
@@ -240,6 +226,75 @@ void igQtCharts::drawLineChart(iGame::ArrayObject::Pointer m_data) {
  * @brief   Returns the QChartView associated with this chart.
  * @return  A pointer to the QChartView object.
  */
+void igQtCharts::drawLineChart(iGame::ArrayObject::Pointer data,
+                               const std::vector<double>& xValues,
+                               int component,
+                               const QString& xAxisTitle) {
+    if (!data || data->GetNumberOfElements() == 0 ||
+        xValues.size() != data->GetNumberOfElements() || component < 0 || component >= data->GetDimension()) {
+        return;
+    }
+
+    auto* series = new QLineSeries();
+    const QString arrayName = QString::fromStdString(data->GetName());
+    const QString componentSuffix = data->GetDimension() > 1
+                                            ? QStringLiteral(" [%1]").arg(component)
+                                            : QString();
+    series->setName(arrayName + componentSuffix);
+    series->setColor(QColor("#4FC3F7"));
+
+    double minY = std::numeric_limits<double>::max();
+    double maxY = std::numeric_limits<double>::lowest();
+    const int dimension = data->GetDimension();
+    for (size_t i = 0; i < xValues.size(); ++i) {
+        const double value = data->GetValue(i * dimension + component);
+        series->append(xValues[i], value);
+        minY = std::min(minY, value);
+        maxY = std::max(maxY, value);
+    }
+
+    chart->removeAllSeries();
+    const auto oldAxes = chart->axes();
+    for (auto* axis : oldAxes) {
+        chart->removeAxis(axis);
+        axis->deleteLater();
+    }
+    chart->addSeries(series);
+
+    auto* axisX = new QValueAxis();
+    double minX = xValues.front();
+    double maxX = xValues.back();
+    if (minX == maxX) {
+        minX -= 0.5;
+        maxX += 0.5;
+    }
+    axisX->setRange(minX, maxX);
+    axisX->setTitleText(xAxisTitle);
+    axisX->setLabelFormat("%.6g");
+    axisX->setTickCount(std::min<int>(6, std::max<int>(2, static_cast<int>(xValues.size()))));
+    chart->addAxis(axisX, Qt::AlignBottom);
+    series->attachAxis(axisX);
+
+    auto* axisY = new QValueAxis();
+    if (minY == maxY) {
+        const double padding = std::max(std::abs(minY) * 0.05, 1.0);
+        minY -= padding;
+        maxY += padding;
+    }
+    axisY->setRange(minY, maxY);
+    axisY->setTitleText(arrayName + componentSuffix);
+    axisY->setLabelFormat("%.6g");
+    chart->addAxis(axisY, Qt::AlignLeft);
+    series->attachAxis(axisY);
+
+    chart->setTitle(QStringLiteral("沿线属性：%1%2").arg(arrayName, componentSuffix));
+    applyTheme();
+    chart->legend()->setVisible(true);
+    setWindowTitle(QStringLiteral("沿线属性曲线"));
+    m_titleLabel->setText(QStringLiteral("沿线属性曲线"));
+    chartView->setChart(chart);
+}
+
 QChartView* igQtCharts::getChartView() const { return chartView; }
 
 void igQtCharts::updateRoundedMask() {
@@ -287,4 +342,76 @@ void igQtCharts::mouseReleaseEvent(QMouseEvent* event) {
 void igQtCharts::resizeEvent(QResizeEvent* event) {
     QDialog::resizeEvent(event);
     updateRoundedMask();
+}
+
+void igQtCharts::applyTheme() {
+    using Role = igQtRenderWidget::UiRole;
+    const QColor bg = igQtRenderWidget::uiRole(Role::PanelBg2);
+    const QColor plotBg = igQtRenderWidget::uiRole(Role::CardBg);
+    const QColor text = igQtRenderWidget::uiRole(Role::Text);
+    const QColor textStrong = igQtRenderWidget::uiRole(Role::TextStrong);
+    const QColor border = igQtRenderWidget::uiRole(Role::Border);
+    const QColor borderStrong = igQtRenderWidget::uiRole(Role::BorderStrong);
+
+    if (chartView) {
+        chartView->setBackgroundBrush(QBrush(bg));
+        chartView->update();
+    }
+
+    if (m_titleBar) {
+        m_titleBar->setStyleSheet(QStringLiteral("background-color: %1; border-bottom: 1px solid %2;")
+                                          .arg(igQtRenderWidget::uiRoleCss(Role::PanelBg),
+                                               igQtRenderWidget::uiRoleCss(Role::Border)));
+    }
+    if (m_titleLabel) {
+        m_titleLabel->setStyleSheet(QStringLiteral(
+                "color: %1; background: transparent; font-size: 13px; padding-left: 8px;")
+                                            .arg(igQtRenderWidget::uiRoleCss(Role::Text)));
+    }
+    if (m_closeButton) {
+        m_closeButton->setStyleSheet(QStringLiteral(
+                "min-width: 28px; max-width: 28px; min-height: 24px; max-height: 24px;"
+                "background-color: transparent; color: %1; border: none; font-size: 14px;")
+                                             .arg(igQtRenderWidget::uiRoleCss(Role::Text))
+                + QStringLiteral("QPushButton#chartCloseButton:hover { background-color: #C42B1C; color: #FFFFFF; }"
+                                 "QPushButton#chartCloseButton:pressed { background-color: #A2261A; color: #FFFFFF; }"));
+    }
+
+    if (!chart) return;
+
+    chart->setBackgroundVisible(true);
+    chart->setBackgroundBrush(QBrush(bg));
+    chart->setBackgroundPen(Qt::NoPen);
+    chart->setBackgroundRoundness(0);
+    chart->setPlotAreaBackgroundVisible(true);
+    chart->setPlotAreaBackgroundBrush(QBrush(plotBg));
+    chart->setPlotAreaBackgroundPen(Qt::NoPen);
+    chart->setTitleBrush(QBrush(textStrong));
+
+    if (chart->legend()) chart->legend()->setLabelColor(text);
+
+    const QList<QAbstractAxis*> axes = chart->axes();
+    for (QAbstractAxis* axis : axes) {
+        if (!axis) continue;
+        axis->setLabelsColor(text);
+        axis->setTitleBrush(QBrush(text));
+        axis->setGridLineColor(border);
+        axis->setLinePenColor(borderStrong);
+    }
+
+    const QList<QAbstractSeries*> seriesList = chart->series();
+    for (QAbstractSeries* s : seriesList) {
+        if (auto* line = qobject_cast<QLineSeries*>(s)) {
+            if (line->name().isEmpty()) line->setPen(QPen(border, 1));
+        }
+    }
+}
+
+void igQtCharts::changeEvent(QEvent* e) {
+    if (e && e->type() == QEvent::StyleChange) {
+        igQtPanelTheme::refreshDeep(this);
+        applyTheme();
+        update();
+    }
+    QDialog::changeEvent(e);
 }

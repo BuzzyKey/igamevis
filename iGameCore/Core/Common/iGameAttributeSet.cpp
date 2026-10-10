@@ -263,9 +263,19 @@ bool iGame::AttributeSet::Attribute::DeepCopy(const iGame::AttributeSet::Attribu
     type = other.type;
     attachmentType = other.attachmentType;
     isDeleted = other.isDeleted;
+    rangeLocked = other.rangeLocked;
+    rangeMode = other.rangeMode;
+    rangeLockedDimension = other.rangeLockedDimension;
+    runningMin = other.runningMin;
+    runningMax = other.runningMax;
+    runningRangeValid = other.runningRangeValid;
 
-    dataRange = DoubleArray::New();
-    dataRange->DeepCopy(other.dataRange);
+    // Preserve lazy range calculation when the source has no cached range.
+    dataRange = nullptr;
+    if (other.dataRange) {
+        dataRange = DoubleArray::New();
+        dataRange->DeepCopy(other.dataRange);
+    }
     return true;
 }
 
@@ -283,10 +293,11 @@ bool iGame::AttributeSet::Attribute::IsNone() const {
 }
 
 iGame::DoubleArray::Pointer iGame::AttributeSet::Attribute::GetDataRange() {
-    if (dataRange == nullptr) {
-        if (!this->pointer) { return dataRange; }
+    if (!this->pointer) { return nullptr; }
+    const int dim = this->pointer->GetDimension();
+    if (dataRange == nullptr || dataRange->GetDimension() != 2 ||
+        dataRange->GetNumberOfElements() != dim + 1) {
         dataRange = DoubleArray::New();
-        int dim = this->pointer->GetDimension();
         dataRange->SetDimension(2);
         dataRange->Resize(dim + 1);
         for (int i = 0; i < dim + 1; i++) {
@@ -299,10 +310,14 @@ iGame::DoubleArray::Pointer iGame::AttributeSet::Attribute::GetDataRange() {
 }
 
 bool iGame::AttributeSet::Attribute::UpdateAllDataRange() {
-    if (dataRange == nullptr) {
+    if (!this->pointer) { return false; }
+    if (dataRange == nullptr || dataRange->GetDimension() != 2 ||
+        dataRange->GetNumberOfElements() != this->pointer->GetDimension() + 1) {
         GetDataRange();
         return true;
     }
+    // 范围锁定：保留固定范围，不按数据重算（供"固定范围"开关使用）
+    if (rangeLocked) { return true; }
     int dim = this->pointer->GetDimension();
     double dimensionRanges[128];
     for (int i = 0; i < 2 * (dim + 1); i += 2) {
