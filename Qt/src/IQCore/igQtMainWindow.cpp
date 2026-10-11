@@ -4753,8 +4753,6 @@ void igQtMainWindow::initAllFilters() {
     });
     addDevelopmentAction(developingFilters, tetraAction,
                          QStringLiteral("四面体化(Mesh Tetrahedralize)"));
-    addDevelopmentAction(developingFilters, simplifyAction,
-                         QStringLiteral("体网格简化 (Volume Mesh Simplification)"));
 
     QMenu* developingData = developingFilters->addMenu(QStringLiteral("数据处理 (Data Processing)"));
     addDevelopmentAction(developingData, approvedMenuAction(mesh_processing,
@@ -5414,6 +5412,9 @@ void igQtMainWindow::initAllFilters() {
                     dialog->close();
                 });
             });
+
+    addDevelopmentAction(developingFiltersBatch2, simplifyAction,
+                         QStringLiteral("体网格简化 (Volume Mesh Simplification)"));
 }
 
 void igQtMainWindow::initAllDockWidgetConnectWithAction() {
