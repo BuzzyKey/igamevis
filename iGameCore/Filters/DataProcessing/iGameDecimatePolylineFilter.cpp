@@ -496,6 +496,10 @@ bool DecimatePolylineFilter::CanProcessInput(DataObject::Pointer input) {
 
 // 执行折线简化，构造输出拓扑并复制保留点和折线的属性。
 bool DecimatePolylineFilter::Execute() {
+    // A failed execution must not expose data produced by an earlier run of
+    // the same filter instance.
+    SetOutput(nullptr);
+
     if (m_DecimationStrategy != DecimationStrategy::Angle && m_DecimationStrategy != DecimationStrategy::CustomField && m_DecimationStrategy != DecimationStrategy::Distance) {
         return false;
     }
@@ -509,13 +513,25 @@ bool DecimatePolylineFilter::Execute() {
     if (m_DecimationStrategy == DecimationStrategy::CustomField) {
         auto attributes = input ? input->GetAttributeSet() : nullptr;
         if (!attributes || m_CustomFieldName.empty()) return false;
-        const auto& attribute = attributes->GetAttribute(m_CustomFieldName);
-        if (attribute.IsNone() || attribute.attachmentType != IG_POINT ||
-            !CreateArrayLike(attribute.pointer) ||
-            attribute.pointer->GetNumberOfElements() < inputPointSet->GetNumberOfPoints()) {
+
+        // AttributeSet::GetAttribute(name) returns the first matching name and
+        // does not distinguish Point Data from Cell Data. Search explicitly so
+        // a same-named Cell Data array cannot shadow the requested point field.
+        auto allAttributes = attributes->GetAllAttributes();
+        if (!allAttributes) return false;
+        for (IGsize i = 0; i < allAttributes->GetNumberOfElements(); ++i) {
+            const auto& candidate = allAttributes->GetElement(i);
+            if (!candidate.isDeleted && candidate.pointer &&
+                candidate.attachmentType == IG_POINT &&
+                candidate.pointer->GetName() == m_CustomFieldName) {
+                customField = candidate.pointer;
+                break;
+            }
+        }
+        if (!customField || !CreateArrayLike(customField) ||
+            customField->GetNumberOfElements() < inputPointSet->GetNumberOfPoints()) {
             return false;
         }
-        customField = attribute.pointer;
     }
 
     auto output = UnstructuredMesh::New();
