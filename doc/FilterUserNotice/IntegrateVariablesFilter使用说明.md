@@ -139,92 +139,43 @@ Set-Location .\build\Examples
 .\Release\testIntegrateVariables.exe
 ```
 
-示例依次读取线、面、体三个模型，并分别显示不开启和开启“单元数据除以总测度”两种情况下的最终数据：
+测试程序会读取线、面、体三个基准模型，校验长度、面积、体积、积分中心和属性积分数值：
 
 | 维度 | 测试模型 | 主要属性 |
 | --- | --- | --- |
-| 1D 线 | `vase2.vtk` | Point Data `height`、Cell Data `segment_id` |
-| 2D 面 | `SurfaceNormalsFilter_pyramid_roof.vtk` | Point Data `PointId`、Cell Data `FaceId` |
-| 3D 体 | `AIGen_Tet_TwistedRod.vtk` | `Temperature`、`Pressure`、`MaterialID`、`CellEnergy` 等 |
+| 1D 线 | `tube_test.vtk` | Point Data `t`、`radius` |
+| 2D 面 | `OutlineCorners_Plane.vtk` | 面积和积分中心 |
+| 3D 体 | `test_mesh.vtk` | `Temperature`、`Pressure`、`Velocity`、`Density`、`Material` |
+
+除此之外，测试还会在内存中构造小型网格，覆盖结构网格点序、ghost 单元排除、四面体/三棱柱/金字塔、非法单元拒绝、SurfaceMesh Cell Data 偏移、失败后清空旧输出，以及“单元数据除以总测度”等回归场景。
+
+程序成功时会逐项打印简洁的数值摘要并以退出码 `0` 结束，例如：
+
+```text
+[PASS] line model: Length=48.7521, t=24.376, radius=11.486, dimension=1, cells=2
+[PASS] area model: Area=48, dimension=2, cells=1
+[PASS] volume model: Volume=1, Temperature=3.5, Pressure=4, ..., dimension=3, cells=1
+...
+[PASS] IntegrateVariables: all test groups passed
+```
+
+出现 `[FAIL]` 或进程返回非零退出码表示测试失败。运行时由文件读取器打印的 `Reading file...` 等调试日志只是模型加载信息，不是测试结论；录制验证视频时应继续展示后面的 `[PASS]` 摘要。
 
 ---
 
-## 三、使用示例
+## 三、数值示例
 
-### 1. 线积分示例
+对于面积为 `0.5`、Cell Data `Pressure=10` 的单个三角形：
 
-`vase2.vtk` 是由 7 条线段组成的花瓶轮廓线，同时包含点属性 `height` 和单元属性 `segment_id`。示例输出：
+- 默认模式输出积分值 `Pressure = 10 × 0.5 = 5`；
+- 开启“单元数据除以总测度”后，输出加权平均值 `Pressure = 5 / 0.5 = 10`；
+- 两种模式的总测度都为 `Area = 0.5`。
 
-```text
-Divide Cell Data By Volume: Off
-Center: 0.618550956249 0 1.96484792233
-Point Data: height = 16.9246727451
-Cell Data:  segment_id = 38.7800007126
-Cell Data:  Length = 10.1386895554
-
-Divide Cell Data By Volume: On
-Center: 0.618550956249 0 1.96484792233
-Point Data: height = 16.9246727451
-Cell Data:  segment_id = 3.82495198227
-Cell Data:  Length = 10.1386895554
-```
-
-### 2. 面积分示例
-
-`SurfaceNormalsFilter_pyramid_roof.vtk` 是同时包含三角形和四边形的表面网格。示例输出：
+测试程序中的 `divide cell data` 用例会自动断言上述结果，并打印：
 
 ```text
-Divide Cell Data By Volume: Off
-Center: 0.5 0.5 0.569035589695
-Point Data: PointId = 24.2900192284
-Cell Data:  FaceId = 19.1923881554
-Cell Data:  Area = 6.41421356237
-
-Divide Cell Data By Volume: On
-Center: 0.5 0.5 0.569035589695
-Point Data: PointId = 24.2900192284
-Cell Data:  FaceId = 2.99216544145
-Cell Data:  Area = 6.41421356237
+[PASS] divide cell data: Area=0.5, Pressure=10, dimension=2, cells=1
 ```
-
-### 3. 体积分示例
-
-`AIGen_Tet_TwistedRod.vtk` 是一个四面体体网格，同时包含：
-
-- Point Data：`Temperature`、`Pressure`、`Displacement`；
-- Cell Data：`MaterialID`、`CellEnergy`。
-
-不开启“单元数据除以总测度”时：
-
-```text
-Divide Cell Data By Volume: Off
-Center: -0.135519579053 -0.418100506067 2.99306607246
-Point Data: Temperature = 54.5537092266
-Point Data: Pressure = 68.2730114901
-Cell Data:  MaterialID = 2.00847404893
-Cell Data:  CellEnergy = 3.15911429152
-Cell Data:  Volume = 0.741240861809
-```
-
-开启该选项后：
-
-```text
-Divide Cell Data By Volume: On
-Center: -0.135519579053 -0.418100506067 2.99306607246
-Point Data: Temperature = 54.5537092266
-Point Data: Pressure = 68.2730114901
-Cell Data:  MaterialID = 2.70961053607
-Cell Data:  CellEnergy = 4.26192679639
-Cell Data:  Volume = 0.741240861809
-```
-
-可以看到：
-
-- Point Data 的积分结果不变；
-- `Volume` 总体积不变；
-- Cell Data 从体积分值变为除以总体积后的体积加权平均值。
-
-示例程序只展示各模型的最终积分数据，不额外输出 `PASSED`。读取或执行失败时会在标准错误中显示失败原因，并返回非零退出码。
 
 ---
 
