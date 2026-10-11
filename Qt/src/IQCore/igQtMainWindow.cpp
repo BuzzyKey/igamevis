@@ -5529,6 +5529,7 @@ void igQtMainWindow::initAllFilters() {
                     dialog->close();
                 });
                 dialog->show();
+            });
 
     // 反转面朝向 (Reverse Sense)。
     connect(developingFiltersBatch2->addAction(QStringLiteral("反转面朝向 (Reverse Sense)")),
