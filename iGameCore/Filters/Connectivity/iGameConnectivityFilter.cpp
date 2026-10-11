@@ -103,22 +103,26 @@ bool ConnectivityFilter::ResolveScalarArray() {
                attr.pointer && attr.pointer->GetDimension() == 1 &&
                attr.pointer->GetNumberOfElements() == m_Mesh->GetNumberOfPoints();
     };
+    auto all = attrSet->GetAllAttributes();
     if (!m_ScalarArrayName.empty()) {
-        const int idx = attrSet->GetAttributeIndex(m_ScalarArrayName);
-        if (idx < 0) {
-            m_Message = "ScalarConnectivity: array not found: " + m_ScalarArrayName;
-            return false;
+        bool foundName = false;
+        if (all) {
+            for (IGsize i = 0; i < all->GetNumberOfElements(); ++i) {
+                auto& attr = all->GetElement(i);
+                if (attr.isDeleted || !attr.pointer || attr.pointer->GetName() != m_ScalarArrayName) continue;
+                foundName = true;
+                if (valid(attr)) {
+                    m_ScalarArray = attr.pointer;
+                    return true;
+                }
+            }
         }
-        auto& attr = attrSet->GetAttribute(idx);
-        if (!valid(attr)) {
-            m_Message = "ScalarConnectivity requires a complete one-component point scalar array";
-            return false;
-        }
-        m_ScalarArray = attr.pointer;
-        return true;
+        m_Message = foundName
+                ? "ScalarConnectivity requires a complete one-component point scalar array"
+                : "ScalarConnectivity: array not found: " + m_ScalarArrayName;
+        return false;
     }
 
-    auto all = attrSet->GetAllAttributes();
     if (all) {
         const IGsize n = all->GetNumberOfElements();
         // 优先使用当前显示属性（若为点属性）。
@@ -209,6 +213,10 @@ bool ConnectivityFilter::Execute() {
     for (IGsize cell = 0; cell < nCells; ++cell) {
         const igIndex* ids = nullptr;
         const int n = m_Mesh->GetFaces()->GetCellIds(cell, ids);
+        if (n <= 0) {
+            m_Message = "Face contains no points";
+            return false;
+        }
         for (int j = 0; j < n; ++j) {
             if (ids[j] < 0 || static_cast<IGsize>(ids[j]) >= nPts) {
                 m_Message = "Face contains an invalid point ID";

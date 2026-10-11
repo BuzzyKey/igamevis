@@ -415,6 +415,95 @@ void TestScalarOrderAndBoundaries() {
     Expect(!f->Execute(), "short scalar array is rejected before indexing");
 }
 
+// BUG: name-only lookup stopped at a cell/vector/multicomponent attribute named "s",
+// even when a later complete one-component point scalar named "s" was available.
+// Trigger: duplicate names with different attachments/types, in either insertion order.
+// Expected: select the first live, complete point scalar with the exact requested name;
+// skip unsuitable candidates, and never fall back to a differently named scalar.
+// Fix commit: 待提交.
+void TestNamedPointScalarLookup() {
+    auto makeArray = [](const char* name, IGsize tuples, int dimension, float value) {
+        auto array = FloatArray::New();
+        array->SetName(name);
+        array->SetDimension(dimension);
+        array->Resize(tuples);
+        for (IGsize i = 0; i < tuples; ++i) {
+            for (int component = 0; component < dimension; ++component) {
+                array->RawPointer(i)[component] = value;
+            }
+        }
+        return array;
+    };
+    auto mesh = MakeChainWithScalar({1,1,1,1,1});
+    auto filter = ConnectivityFilter::New();
+    filter->SetInput(mesh);
+    filter->SetScalarConnectivity(true);
+    filter->SetFullScalarConnectivity(true);
+    filter->SetScalarRange(1,1);
+    filter->SetScalarArrayName("s");
+    filter->SetExtractionMode(ConnectivityFilter::CELL_SEEDED_REGIONS);
+    filter->AddSeed(0);
+    const char* cases[] = {
+        "cell scalar before same-name point scalar",
+        "point scalar before same-name cell scalar",
+        "vector before same-name point scalar",
+        "multicomponent scalar before same-name point scalar",
+        "deleted attribute before same-name point scalar",
+        "null attribute before same-name point scalar"
+    };
+    for (int scenario = 0; scenario < 6; ++scenario) {
+        auto attrs = AttributeSet::New();
+        auto point = makeArray("s", 5, 1, 1);
+        if (scenario == 1) attrs->AddAttribute(IG_SCALAR, IG_POINT, point);
+        if (scenario <= 1) attrs->AddAttribute(IG_SCALAR, IG_CELL, makeArray("s", 2, 1, 0));
+        if (scenario == 2) attrs->AddAttribute(IG_VECTOR, IG_POINT, makeArray("s", 5, 3, 0));
+        if (scenario == 3) attrs->AddAttribute(IG_SCALAR, IG_POINT, makeArray("s", 5, 2, 0));
+        if (scenario == 4) {
+            const IGsize id = attrs->AddAttribute(IG_SCALAR, IG_POINT, makeArray("s", 5, 1, 0));
+            attrs->DeleteAttribute(id);
+        }
+        if (scenario == 5) attrs->GetAllAttributes()->AddElement(AttributeSet::Attribute::None());
+        if (scenario != 1) attrs->AddAttribute(IG_SCALAR, IG_POINT, point);
+        mesh->SetAttributeSet(attrs);
+        Expect(filter->Execute(), cases[scenario]);
+        auto output = DynamicCast<SurfaceMesh>(filter->GetOutput());
+        Expect(output && output->GetNumberOfFaces() == 2 && filter->GetNumberOfExtractedRegions() == 1,
+               "named point scalar controls eligibility and keeps both connected faces");
+        Expect(point->GetValue(0) == 1 && point->GetNumberOfElements() == 5,
+               "scalar lookup retains the input point array");
+    }
+
+    for (int scenario = 0; scenario < 5; ++scenario) {
+        auto attrs = AttributeSet::New();
+        attrs->AddAttribute(IG_SCALAR, IG_POINT, makeArray("other", 5, 1, 1));
+        if (scenario == 0) attrs->AddAttribute(IG_SCALAR, IG_CELL, makeArray("s", 2, 1, 1));
+        if (scenario == 1) attrs->AddAttribute(IG_VECTOR, IG_POINT, makeArray("s", 5, 3, 1));
+        if (scenario == 2) attrs->AddAttribute(IG_SCALAR, IG_POINT, makeArray("s", 5, 2, 1));
+        if (scenario == 3) attrs->AddAttribute(IG_SCALAR, IG_POINT, makeArray("s", 2, 1, 1));
+        mesh->SetAttributeSet(attrs);
+        Expect(!filter->Execute() && !filter->GetOutput(),
+               "missing or unsuitable named scalar fails without fallback or stale output");
+        Expect(!filter->GetMessage().empty(), "named scalar failure provides a diagnostic");
+    }
+}
+
+// BUG: an empty face was counted as a region but skipped when building output,
+// so region sizes/count no longer described the output faces.
+// Trigger: a valid surface followed by a zero-vertex face.
+// Expected: reject the malformed topology, report why and clear the prior output.
+// Fix commit: 待提交.
+void TestEmptyFace() {
+    auto filter = ConnectivityFilter::New();
+    filter->SetExtractionMode(ConnectivityFilter::ALL_REGIONS);
+    auto mesh = MakeThreeIslands();
+    filter->SetInput(mesh);
+    Expect(filter->Execute(), "empty-face reuse begins with valid output");
+    const igIndex dummy = 0;
+    mesh->GetFaces()->AddCellIds(&dummy, 0);
+    Expect(!filter->Execute() && !filter->GetOutput(), "empty face is rejected without a phantom region or stale output");
+    Expect(!filter->GetMessage().empty(), "empty face provides a diagnostic");
+}
+
 // BUG: invalid parameters could silently select a region or leave previous outputs accessible.
 // Expected: reject nonfinite coordinates/invalid sorted IDs; keep failures clear of stale output.
 // Fix commit: 3947ff2d86205e3b2205b24bc73876d076d8dbee.
@@ -453,6 +542,8 @@ int main() {
     TestExactAttributes();
     TestRepeatAndSortedSelection();
     TestScalarOrderAndBoundaries();
+    TestNamedPointScalarLookup();
+    TestEmptyFace();
     TestAdditionalFailuresAndFan();
 
     std::printf("total checks: %d, failures: %d\n", g_checks, g_failures);
