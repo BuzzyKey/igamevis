@@ -420,7 +420,7 @@ void TestScalarOrderAndBoundaries() {
 // Trigger: duplicate names with different attachments/types, in either insertion order.
 // Expected: select the first live, complete point scalar with the exact requested name;
 // skip unsuitable candidates, and never fall back to a differently named scalar.
-// Fix commit: 待提交.
+// Fix commit: 3940540ca75ee4a8ee3d139e25013aab115a6bb3.
 void TestNamedPointScalarLookup() {
     auto makeArray = [](const char* name, IGsize tuples, int dimension, float value) {
         auto array = FloatArray::New();
@@ -491,7 +491,7 @@ void TestNamedPointScalarLookup() {
 // so region sizes/count no longer described the output faces.
 // Trigger: a valid surface followed by a zero-vertex face.
 // Expected: reject the malformed topology, report why and clear the prior output.
-// Fix commit: 待提交.
+// Fix commit: 3940540ca75ee4a8ee3d139e25013aab115a6bb3.
 void TestEmptyFace() {
     auto filter = ConnectivityFilter::New();
     filter->SetExtractionMode(ConnectivityFilter::ALL_REGIONS);
