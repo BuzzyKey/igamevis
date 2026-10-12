@@ -9,7 +9,7 @@
  *      自采样（探针 = 被采样网格本身）时有效点的插值结果应等于该点原值；
  *   3) validpointmask 与 GetSampleValidMask() 一致；网格外的点标记无效、插值填 0；
  *   4) 吸附半径关闭时近距网格外的点无效，开启后被吸附为有效，而远处的点仍无效；
- *   5) 「采样点网格」自身的数组被保留；与采样结果同名时以采样结果为准（不重复出现）；
+ *   5) 「采样点网格」自身的数组**不**被复制到输出（对齐 vtkProbeFilter 默认 PassPointArrays/CellArrays=0）；
  *   6) 缺少输入时 Execute() 返回 false 并给出消息。
  *
  * 「被采样网格」从 Examples/Models/RenameResample_test.vtk 读入（单位六面体，
@@ -168,7 +168,7 @@ void TestSelfProbeOnMesh() {
     int hits = 0;
     auto outValue = FindPointArray(output->GetAttributeSet(), "value", &hits);
     Check(outValue != nullptr, "输出含插值数组 value");
-    Check(hits == 1, "value 只出现一次（与探针自身同名数组不重复）");
+    Check(hits == 1, "value 只出现一次（采样点网格自身数组不再参与，天然不重复）");
 
     // 探针点即原网格点：有效点的插值结果应等于该点原值
     const std::vector<unsigned char>& mask = filter->GetSampleValidMask();
@@ -188,7 +188,7 @@ void TestSelfProbeOnMesh() {
 }
 
 /* ------------------------------------------------------------------ */
-/* 用例 2：点云探针（检查输出类型/坐标/mask/自带数组保留/数值）          */
+/* 用例 2：点云探针（检查输出类型/坐标/mask/自带数组不复制/数值）        */
 /* ------------------------------------------------------------------ */
 void TestPointCloudProbe() {
     std::cout << "\n== 用例 2：点云探针（输出为点云拷贝 + 采样属性）" << std::endl;
@@ -251,10 +251,17 @@ void TestPointCloudProbe() {
     Check(mask[3] == 0, "远处盒外点（3）无效");
     if (outValue != nullptr) { CheckNear(outValue->GetElementValue(3, 0), 0.0, 1e-6, "无效点的插值填 0"); }
 
-    // 探针自带的数组被保留
+    // 变更说明（与本次修复同次首次提交，为避免自引用此处不写提交号）：
+    //   原现象：本滤波器把「采样点网格」自身的数组一并复制到输出（等价 PassPointArrays/PassCellArrays = ON），
+    //           无效点上仍是原值，看起来像"未命中却没置 0"。
+    //   正确行为：对齐 vtkProbeFilter 默认值（PassPointArrays = 0、PassCellArrays = 0），输出只含
+    //           被采样网格的插值点数据 + 按命中单元复制的单元数据 + validpointmask。
+    //   本次提交主题："fix: ResampleWithDataSet 不再复制采样点网格自身属性（对齐 vtkProbeFilter 默认 PassPointArrays/CellArrays=0）"
+    //   查询该测试引入提交的命令：
+    //     git log --diff-filter=A --format="%h %s" -- Examples/Filter/TestResampleWithDataSet.cpp
     int markerHits = 0;
     auto outMarker = FindPointArray(output->GetAttributeSet(), "probe_marker", &markerHits);
-    Check(outMarker != nullptr && markerHits == 1, "探针自身的数组 probe_marker 被保留");
+    Check(outMarker == nullptr && markerHits == 0, "采样点网格自身的数组 probe_marker 不再出现在输出中");
     if (outMarker != nullptr) { CheckNear(outMarker->GetElementValue(0, 0), 100.0, 1e-6, "probe_marker 数值保持"); }
 
     std::cout << "        有效点数 = " << static_cast<int>(filter->GetSampleValidMask().size()) << " 中 "

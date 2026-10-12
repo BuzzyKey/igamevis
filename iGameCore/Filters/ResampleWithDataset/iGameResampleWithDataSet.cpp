@@ -1798,15 +1798,15 @@ bool ResampleWithDataSet::Execute() {
         ++m_SnappedPointCount;
     }
 
-    // 属性：① 源点数据插值 ② 源单元数据按命中单元拷到点 ③ validpointmask ④ 采样点网格自身数组
+    // 属性：① 被采样网格的点数据插值 ② 其单元数据按命中单元拷到点 ③ validpointmask
+    // 注意：对齐 vtkProbeFilter 的默认值（PassPointArrays = 0、PassCellArrays = 0），
+    // 「采样点网格」自身的属性数组不再复制到输出里。
     AttributeSet* inAttr = mesh->GetAttributeSet();
     AttributeSet::Pointer outAttr = AttributeSet::New();
     std::vector<std::string> producedPointNames;
     InterpolatePointData(inAttr, outAttr, locations, sampleNum, producedPointNames);
-    std::vector<std::string> producedNames = producedPointNames;
-    CopyCellData(inAttr, outAttr, locations, sampleNum, producedPointNames, producedNames);
-    AddValidPointMask(outAttr, sampleNum, producedNames);
-    CopyProbeAttributes(probe->GetAttributeSet(), outAttr, producedNames);
+    CopyCellData(inAttr, outAttr, locations, sampleNum, producedPointNames);
+    AddValidPointMask(outAttr, sampleNum);
 
     // 输出 = 采样点网格的同类型深拷贝（几何/拓扑独立），属性换成采样结果
     auto output = DeepCopyDataObject(probe, outAttr);
@@ -2322,8 +2322,7 @@ void ResampleWithDataSet::InterpolatePointData(AttributeSet* inSet, AttributeSet
 
 void ResampleWithDataSet::CopyCellData(AttributeSet* inSet, AttributeSet::Pointer outSet,
                                   const std::vector<SampleLocation>& locations, int sampleNum,
-                                  const std::vector<std::string>& pointNames,
-                                  std::vector<std::string>& producedNames) {
+                                  const std::vector<std::string>& pointNames) {
     if (inSet == nullptr || outSet == nullptr) { return; }
     auto all = inSet->GetAllAttributes();
     if (all == nullptr) { return; }
@@ -2362,7 +2361,7 @@ void ResampleWithDataSet::CopyCellData(AttributeSet* inSet, AttributeSet::Pointe
             dst->SetElement(static_cast<IGsize>(j), values.data());
         }
 
-        producedNames.push_back(src->GetName());
+        // 输出不再包含采样点网格自身的数组，这里无需记录数组名
         // 复制到采样点上，因此附着类型为 IG_POINT
         outSet->AddAttribute(attr.type, IG_POINT, dst, attr.GetDataRange());
     }
@@ -2378,8 +2377,7 @@ std::vector<igIndex> ResampleWithDataSet::GetValidPoints() const {
     return ids;
 }
 
-void ResampleWithDataSet::AddValidPointMask(AttributeSet::Pointer outSet, int sampleNum,
-                                            std::vector<std::string>& producedPointNames) {
+void ResampleWithDataSet::AddValidPointMask(AttributeSet::Pointer outSet, int sampleNum) {
     if (outSet == nullptr) { return; }
 
     auto mask = UnsignedCharArray::New();
@@ -2394,38 +2392,9 @@ void ResampleWithDataSet::AddValidPointMask(AttributeSet::Pointer outSet, int sa
     }
 
     // 掩膜附着在采样点上：1 = 可插值，0 = 无效。默认名 validpointmask（与 ResampleToLine 一致），可用 SetValidPointMaskArrayName("vtkValidPointMask") 对齐 VTK 默认命名。
-    producedPointNames.push_back(m_ValidPointMaskArrayName);
+    // 掩膜数组名 = m_ValidPointMaskArrayName
     outSet->AddAttribute(IG_SCALAR, IG_POINT, mask);
 }
-
-/* ------------------------------------------------------------------ */
-/* 采样点网格自身的属性                                                */
-/* ------------------------------------------------------------------ */
-void ResampleWithDataSet::CopyProbeAttributes(AttributeSet* inSet, AttributeSet::Pointer outSet,
-                                             const std::vector<std::string>& producedPointNames) {
-    if (inSet == nullptr || outSet == nullptr) { return; }
-
-    auto all = inSet->GetAllAttributes();
-    if (all == nullptr) { return; }
-
-    for (IGsize i = 0; i < all->GetNumberOfElements(); ++i) {
-        auto& attr = all->GetElement(i);
-        if (attr.isDeleted || attr.pointer == nullptr) { continue; }
-
-        // 采样点网格的「点」属性与采样结果同名时，以采样结果为准（对应 VTK 的
-        // PassPointArrays 与 probe 结果冲突时的取舍）；「单元」属性照常保留
-        // （输出与采样点网格同拓扑，尺寸天然匹配，对应 PassCellArrays）
-        if (attr.attachmentType == IG_POINT &&
-            std::find(producedPointNames.begin(), producedPointNames.end(), attr.pointer->GetName()) !=
-                    producedPointNames.end()) {
-            continue;
-        }
-
-        // 数组共享、属性条目独立，避免两个 AttributeSet 共用同一属性条目
-        outSet->AddAttribute(attr.type, attr.attachmentType, attr.pointer, attr.dataRange);
-    }
-}
-
 
 /* ------------------------------------------------------------------ */
 /* 吸附搜索                                                            */

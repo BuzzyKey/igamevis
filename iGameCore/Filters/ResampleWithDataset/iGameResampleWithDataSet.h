@@ -37,8 +37,8 @@ IGAME_NAMESPACE_BEGIN
  *        同时存在于输入 0 的点数据与单元数据，只取点数据）；
  *     ③ validpointmask（UnsignedCharArray，1 = 该采样点插值成功，0 = 无效；无效点的
  *        各插值属性填 0）；
- *     ④ 输入 1 自身的属性数组也一并保留（对应 VTK 的 PassPointArrays / PassCellArrays）；
- *        若输入 1 的**点**属性与 ①②③ 产出的数组同名，以采样结果为准（单元属性不受影响）。
+ *     （不包含）输入 1 自身的属性数组：本实现不复制「采样点网格」自带的数组，
+ *     与 vtkProbeFilter 的默认值 PassPointArrays = 0 / PassCellArrays = 0 一致。
  *
  * 采样与容差：
  *   - 采样位置是输入 1 的所有点，不再沿线均匀生成；
@@ -168,13 +168,8 @@ private:
     /** 输入 0 的单元数据按命中单元 → 输出点；pointNames 中的名字（源点数据）优先，同名跳过 */
     void CopyCellData(AttributeSet* inSet, AttributeSet::Pointer outSet,
                       const std::vector<SampleLocation>& locations, int sampleNum,
-                      const std::vector<std::string>& pointNames,
-                      std::vector<std::string>& producedNames);
-    void AddValidPointMask(AttributeSet::Pointer outSet, int sampleNum,
-                           std::vector<std::string>& producedPointNames);
-    /** 保留输入 1 自身的属性数组；与 producedPointNames 同名的点属性跳过（采样结果优先） */
-    void CopyProbeAttributes(AttributeSet* inSet, AttributeSet::Pointer outSet,
-                             const std::vector<std::string>& producedPointNames);
+                      const std::vector<std::string>& pointNames);
+    void AddValidPointMask(AttributeSet::Pointer outSet, int sampleNum);
 
     ResampleWithDataSet() {
         SetNumberOfInputs(2);

@@ -16,7 +16,7 @@
   1. 输入 0 的**点数据**插值到输出点上；
   2. 输入 0 的**单元数据**按命中单元拷到输出点上（与 `vtkProbeFilter` 一致；若同名数组同时存在于输入 0 的点数据与单元数据，只取点数据）；
   3. `validpointmask`（`UnsignedCharArray`，`1` = 该采样点插值成功，`0` = 无效；无效点的各插值属性填 `0`）；
-  4. 输入 1 自身的属性数组一并保留（对应 VTK 的 `PassPointArrays` / `PassCellArrays`）；若输入 1 的**点**属性与上述 1~3 产出的数组同名，以采样结果为准。
+  4. **不再**复制输入 1 自身的属性数组（对齐 VTK 的默认值 `PassPointArrays = 0` / `PassCellArrays = 0`）：输出只含上面 1~3 三项。
 
 采样位置、容差与吸附：
 
@@ -163,6 +163,6 @@ Examples/Filter/TestResampleWithDataSet.cpp
 5. 吸附半径默认关闭，且**没有在面板中暴露**，只提供 API；开启后不会移动采样点坐标。
 6. 「被采样网格」若不是 `UnstructuredMesh`（例如 `SurfaceMesh` / `VolumeMesh` / `StructuredMesh`），会先转换成 `UnstructuredMesh` 再参与定位与插值；转换会复制一份数据。
 7. 未覆盖的高次单元会退化为角点线性处理：非线性的二次场在这些单元上不再精确，注意 `GetUnsupportedQuadraticCellCount()` 与消息提示。
-8. 采样点网格自身的数组会保留；与采样结果同名时以采样结果为准。若需要保留原名，请先用 RenameArrays 改名。
+8. 采样点网格自身的数组**不会**被复制到输出（与 `vtkProbeFilter` 默认的 `PassPointArrays` / `PassCellArrays` 一致）；若确实需要这些数组，请自行用其它滤波器处理。
 9. `Execute()` 失败时 `GetOutput(0)` 为 `nullptr`，失败原因从 `GetMessage()` 获取（例如「未选择「被采样网格」」「「采样点网格」没有点，无法确定采样位置」）。
 10. 点的定位走均匀网格加速（按被采样网格包围盒划分），一次执行的采样点数等于「采样点网格」的点数；点数很多时建议先把被采样网格裁剪到关心的区域再采样。
