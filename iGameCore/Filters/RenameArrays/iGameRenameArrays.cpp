@@ -1,8 +1,4 @@
-//
-// Created by Ayanami on 2026/9/29.
-//
-// 重命名数组（对标 ParaView 的 Rename Arrays / VTK vtkArrayRename）
-//
+
 // 实现要点：
 //   1) 输出 = filter 内部深拷贝(输入)：同类型、几何/拓扑/属性都独立的新网格，输入不被修改；
 //   2) 因为是独立副本，改名只需在输出的属性集上 SetName（不需要像 VTK 那样克隆数组对象——
@@ -65,10 +61,8 @@ void DeepCopyPointSetBase(PointSet* output, PointSet* input, AttributeSet::Point
     output->SetName(input->GetName());
 }
 
-} // namespace
-
 // 按数据类型创建并深拷贝一个独立输出对象
-DataObject::Pointer DeepCopyDataObject(DataObject::Pointer input, AttributeSet::Pointer attributes) {
+DataObject::Pointer DeepCopyDataObject(DataObject::Pointer input, AttributeSet::Pointer attributes = nullptr) {
     if (input == nullptr) {
         return nullptr;
     }

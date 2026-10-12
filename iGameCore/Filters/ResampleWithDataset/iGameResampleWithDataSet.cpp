@@ -66,10 +66,8 @@ void DeepCopyPointSetBase(PointSet* output, PointSet* input, AttributeSet::Point
     output->SetName(input->GetName());
 }
 
-} // namespace
-
 // 按数据类型创建并深拷贝一个独立输出对象
-DataObject::Pointer DeepCopyDataObject(DataObject::Pointer input, AttributeSet::Pointer attributes) {
+DataObject::Pointer DeepCopyDataObject(DataObject::Pointer input, AttributeSet::Pointer attributes = nullptr) {
     if (input == nullptr) {
         return nullptr;
     }
