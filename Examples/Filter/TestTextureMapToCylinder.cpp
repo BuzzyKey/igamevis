@@ -10,6 +10,8 @@
 #include <iGameFileIO.h>
 #include <iGameInteractor.h>
 #include <iGameRenderWindow.h>
+#include <iGameCellType.h>
+#include <iGameSurfaceMesh.h>
 #include <iGameUnstructuredMesh.h>
 #include <iostream>
 #include <string>
@@ -57,6 +59,22 @@ iGame::UnstructuredMesh::Pointer LoadMesh(const std::string& fileName) {
         ++g_failed;
     }
     return mesh;
+}
+
+/// 读文件但保留原始类型：POLYDATA 模型会被读成表面网格（面表 + 边表），
+/// 不能像无结构网格那样直接取
+iGame::DataObject::Pointer LoadAny(const std::string& fileName) {
+    if (!std::filesystem::exists(fileName)) {
+        std::cerr << " [FAIL] model not found: " << fileName << "\n";
+        ++g_failed;
+        return nullptr;
+    }
+    iGame::DataObject::Pointer obj = iGame::FileIO::ReadFile(fileName);
+    if (obj == nullptr) {
+        std::cerr << " [FAIL] ReadFile returned null: " << fileName << "\n";
+        ++g_failed;
+    }
+    return obj;
 }
 
 /// 按名字 + 挂载位置（IG_POINT / IG_CELL）查属性数组
@@ -331,6 +349,94 @@ void TestRepeatedExecution() {
           "input mesh still untouched after two runs");
 }
 
+/// 场景 6：表面网格里的独立线段必须被保留
+/// （本过滤器只追加纹理坐标，不应该改变输入的几何）
+void TestLooseEdgesPreserved() {
+    std::cerr << "[case 6] surface mesh with a standalone line keeps all geometry\n";
+
+    auto obj = LoadAny("./Models/TextureMapToCylinder_loose_line.vtk");
+    if (obj == nullptr) { return; }
+    auto sm = iGame::DynamicCast<iGame::SurfaceMesh>(obj);
+    Check(sm != nullptr, "input is read as a SurfaceMesh (separate face / edge tables)");
+    if (sm == nullptr) { return; }
+
+    // 模型内容：5 个点、1 个三角面 + 1 条不属于任何面的独立线段
+    Check(sm->GetNumberOfPoints() == 5, "input: 5 points");
+    Check(static_cast<IGsize>(sm->GetNumberOfFaces()) == 1, "input: 1 face");
+    Check(static_cast<IGsize>(sm->GetNumberOfEdges()) == 1, "input: 1 standalone edge");
+
+    auto filter = iGame::TextureMapToCylinderFilter::New();
+    filter->SetAutomaticCylinderGeneration(false);
+    filter->SetPoint1(0.0, 0.0, -1.0);
+    filter->SetPoint2(0.0, 0.0, 1.0);
+    filter->SetInput(obj);
+    Check(filter->Execute(), "Execute() returns true (message: " + filter->GetMessage() + ")");
+
+    auto out = iGame::DynamicCast<iGame::UnstructuredMesh>(filter->GetOutput());
+    if (out == nullptr) {
+        Check(false, "GetOutput() is an UnstructuredMesh");
+        return;
+    }
+    Check(out->GetNumberOfPoints() == 5, "output keeps all 5 points");
+    Check(out->GetNumberOfCells() == 2,
+          "output keeps BOTH cells (triangle + standalone line), got " +
+              std::to_string(out->GetNumberOfCells()));
+
+    // 两个单元应当正好是一个三角形 + 一条线段
+    auto types = out->GetCellTypes();
+    int nTri = 0, nLine = 0;
+    for (IGsize i = 0; i < out->GetNumberOfCells(); ++i) {
+        const unsigned int t = static_cast<unsigned int>(types->GetValue(i));
+        if (t == iGame::IG_TRIANGLE) { ++nTri; }
+        else if (t == iGame::IG_LINE) { ++nLine; }
+    }
+    Check(nTri == 1 && nLine == 1,
+          "one triangle and one line cell (tri=" + std::to_string(nTri) + ", line=" +
+              std::to_string(nLine) + ")");
+
+    // 纹理坐标覆盖每个点，已有属性照旧
+    auto tc = FindArray(out, "Texture Coordinates", IG_POINT);
+    Check(tc != nullptr && static_cast<IGsize>(tc->GetNumberOfElements()) == 5,
+          "texture coordinates created for all 5 points");
+    auto pv = FindArray(out, "p_val", IG_POINT);
+    Check(pv != nullptr && static_cast<IGsize>(pv->GetNumberOfElements()) == 5,
+          "existing Point Data 'p_val' preserved (5)");
+}
+
+/// 场景 7：很短的轴不该被误判成退化
+/// （轴长只决定 t 的量程，不影响能不能建立参考方向，也不影响 s）
+void TestShortAxisNotDegenerate() {
+    std::cerr << "[case 7] very short axis (1e-6) is not treated as degenerate\n";
+    auto mesh = LoadMesh("./Models/TextureMapToCylinder_tube.vtk");
+    if (mesh == nullptr) { return; }
+
+    auto filter = iGame::TextureMapToCylinderFilter::New();
+    filter->SetAutomaticCylinderGeneration(false);
+    filter->SetPoint1(0.0, 0.0, 0.0);
+    filter->SetPoint2(0.0, 0.0, 1e-6);  // 两端点不同，轴长仅 1e-6
+    filter->SetInput(mesh);
+    const bool ok = filter->Execute();
+    Check(ok, "short axis still executes (message: " + filter->GetMessage() + ")");
+    if (!ok) { return; }
+
+    auto out = iGame::DynamicCast<iGame::UnstructuredMesh>(filter->GetOutput());
+    if (out == nullptr) {
+        Check(false, "GetOutput() is an UnstructuredMesh");
+        return;
+    }
+    auto tc = FindArray(out, "Texture Coordinates", IG_POINT);
+    Check(tc != nullptr, "texture coordinates are produced");
+    if (tc == nullptr) { return; }
+
+    // s 只取决于绕轴的角度，与轴的绝对长短无关：应与长轴给出同一组值
+    const double expectS[8] = {0.0, 0.25, 0.5, 0.75, 1.0, 0.75, 0.5, 0.25};
+    bool sOK = true;
+    for (int k = 0; k < 8; ++k) {
+        if (!Near(Comp(tc, k, 0), expectS[k], 1e-5)) { sOK = false; }
+    }
+    Check(sOK, "s is unaffected by the axis length (same as the long axis)");
+}
+
 /// 可视化演示：弹出圆柱管模型（纹理坐标本身在 iGameVis 里暂时没有贴图渲染通路，
 /// 因此这里只做几何展示；数值验证见上面的断言）
 void VisualizeResult() {
@@ -364,6 +470,8 @@ int main() {
     TestManualAxis();
     TestFailureCases();
     TestRepeatedExecution();
+    TestLooseEdgesPreserved();
+    TestShortAxisNotDegenerate();
 
     if (g_failed == 0) {
         std::cerr << "[testTextureMapToCylinder] PASS: all checks passed\n";

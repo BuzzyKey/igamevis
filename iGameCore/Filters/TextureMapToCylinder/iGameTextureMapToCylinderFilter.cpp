@@ -17,6 +17,7 @@
 #include <exception>
 #include <limits>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 IGAME_NAMESPACE_BEGIN
@@ -96,8 +97,14 @@ ArrayObject::Pointer CopyAttribute(ArrayObject::Pointer source) {
     return copy;
 }
 
-/// 深拷贝属性集；跳过旧的同名纹理坐标数组，保证重复执行不堆积同名数组
-AttributeSet::Pointer DeepCopyAttributes(AttributeSet::Pointer src, const std::string& skipName) {
+/// 深拷贝属性集；跳过旧的同名纹理坐标数组，保证重复执行不堆积同名数组。
+///
+/// expectedCellCount > 0 时把「单元属性」的长度对齐到输出单元数：
+/// 表面网格输入可能带独立线段（输出单元数多于输入单元数），
+/// 这些新增单元没有对应的原始数据，按 0 补齐。
+/// 不对齐的话数组会比单元数短，后续按单元查询或着色会读到越界数据。
+AttributeSet::Pointer DeepCopyAttributes(AttributeSet::Pointer src, const std::string& skipName,
+                                         IGsize expectedCellCount = 0) {
     auto dst = AttributeSet::New();
     if (src == nullptr) { return dst; }
     auto all = src->GetAllAttributes();
@@ -109,6 +116,12 @@ AttributeSet::Pointer DeepCopyAttributes(AttributeSet::Pointer src, const std::s
         if (attr.attachmentType == IG_POINT && attr.pointer->GetName() == skipName) { continue; }
         auto copy = CopyAttribute(attr.pointer);
         if (copy == nullptr) { continue; }
+        // 单元属性对齐到输出单元数：前面的面沿用原值，新追加的独立线段补 0
+        // （FlatArray::Resize 走底层 vector::resize，新增元素会被值初始化为 0）
+        if (attr.attachmentType == IG_CELL && expectedCellCount > 0 &&
+            copy->GetNumberOfElements() < expectedCellCount) {
+            copy->Resize(expectedCellCount);
+        }
         DoubleArray::Pointer copyRange = nullptr;
         if (attr.dataRange != nullptr) {
             copyRange = DoubleArray::New();
@@ -145,6 +158,96 @@ CellArray::Pointer DeepCopyCellArray(CellArray::Pointer src) {
     return dst;
 }
 
+/// 收集一个单元表里所有单元的"无向边"，键为 (较小点索引 << 32) | 较大点索引
+void CollectCellEdges(CellArray::Pointer cells, std::unordered_set<unsigned long long>& out) {
+    if (cells == nullptr) { return; }
+    const IGsize n = cells->GetNumberOfCells();
+    std::vector<igIndex> ids(IGAME_CELL_MAX_SIZE, 0);
+    for (IGsize i = 0; i < n; ++i) {
+        const IGuint needed = cells->GetCellSize(i);
+        if (needed < 2) { continue; }  // 点单元没有边
+        if (ids.size() < needed) { ids.resize(needed); }
+        const int vcnt = cells->GetCellIds(i, ids.data());
+        if (vcnt < 2) { continue; }
+        for (int k = 0; k < vcnt; ++k) {
+            const igIndex a = ids[k];
+            const igIndex b = ids[(k + 1) % vcnt];
+            const igIndex lo = (a < b) ? a : b;
+            const igIndex hi = (a < b) ? b : a;
+            out.insert((static_cast<unsigned long long>(lo) << 32) |
+                       static_cast<unsigned long long>(hi));
+        }
+    }
+}
+
+/**
+ * 由「面表 + 边表」重建无结构网格的单元表与单元类型表，保留独立线段。
+ *
+ * 为什么需要它：读 .vtk 时 POLYGONS 落在表面网格的面表、LINES 落在它的边表，
+ * 而通用的「转无结构网格」只搬面表 —— 那些不属于任何面、作为独立线段存在的几何
+ * 会被整段丢掉。本过滤器只是在点数据上追加一组纹理坐标，不应当改变输入的几何，
+ * 所以这里把独立线段识别出来一并带走。
+ *
+ * 独立线段的判定：先收集面单元的全部无向边，边表里「不在其中」的才算独立线段。
+ * 这样即使边表里混着由面派生出来的边（部分流程会调用 BuildEdges 填充边表），
+ * 也不会被当成独立几何重复输出。
+ *
+ * @param faces      面单元表（可为空）
+ * @param edges      边表（可为空，表面网格独有）
+ * @param outCells   [出] 新建的单元表
+ * @param outTypes   [出] 新建的单元类型表，与 outCells 一一对应
+ * @param looseEdges [出] 保留下来的独立线段条数
+ */
+void BuildCellsWithLooseEdges(CellArray::Pointer faces, CellArray::Pointer edges,
+                              CellArray::Pointer& outCells, UnsignedIntArray::Pointer& outTypes,
+                              IGsize& looseEdges) {
+    outCells = CellArray::New();
+    outTypes = UnsignedIntArray::New();
+    looseEdges = 0;
+
+    std::vector<igIndex> ids(IGAME_CELL_MAX_SIZE, 0);
+    std::vector<unsigned int> types;
+
+    // 1) 面：类型按顶点数判定（3 三角形 / 4 四边形 / 其余多边形）
+    if (faces != nullptr) {
+        const IGsize n = faces->GetNumberOfCells();
+        for (IGsize i = 0; i < n; ++i) {
+            const IGuint needed = faces->GetCellSize(i);
+            if (ids.size() < needed) { ids.resize(needed); }
+            const int vcnt = faces->GetCellIds(i, ids.data());
+            if (vcnt <= 0) { continue; }
+            outCells->AddCellIds(ids.data(), vcnt);
+            types.push_back(static_cast<unsigned int>(
+                vcnt == 3 ? IG_TRIANGLE : (vcnt == 4 ? IG_QUAD : IG_POLYGON)));
+        }
+    }
+
+    // 2) 边：只留下不属于任何面的那些，作为独立线段单元追加在面之后
+    if (edges != nullptr && edges->GetNumberOfCells() > 0) {
+        std::unordered_set<unsigned long long> faceEdges;
+        CollectCellEdges(faces, faceEdges);
+        const IGsize n = edges->GetNumberOfCells();
+        for (IGsize i = 0; i < n; ++i) {
+            if (edges->GetCellSize(i) != 2) { continue; }  // 独立线段按两点一条计
+            const int vcnt = edges->GetCellIds(i, ids.data());
+            if (vcnt != 2) { continue; }
+            const igIndex lo = (ids[0] < ids[1]) ? ids[0] : ids[1];
+            const igIndex hi = (ids[0] < ids[1]) ? ids[1] : ids[0];
+            const unsigned long long key = (static_cast<unsigned long long>(lo) << 32) |
+                                           static_cast<unsigned long long>(hi);
+            if (faceEdges.count(key) != 0) { continue; }  // 面的派生边，不是独立几何
+            outCells->AddCellIds(ids.data(), 2);
+            types.push_back(static_cast<unsigned int>(IG_LINE));
+            ++looseEdges;
+        }
+    }
+
+    outTypes->Resize(static_cast<IGsize>(types.size()));
+    for (size_t i = 0; i < types.size(); ++i) {
+        outTypes->SetValue(static_cast<IGsize>(i), types[i]);
+    }
+}
+
 /**
  * 自动求轴：对点云做**主成分分析**，取协方差矩阵最大特征值方向为主轴，
  * 轴的两个端点为点云沿该轴投影的极小/极大位置。
@@ -152,11 +255,10 @@ CellArray::Pointer DeepCopyCellArray(CellArray::Pointer src) {
  * 轴对齐网格与圆柱/管类模型能稳定给出轴向；各向同性模型（立方体/球体）
  * 主轴不唯一，此时应关闭自动、手动给出轴两端点。
  */
-bool ResolveAutoAxis(UnstructuredMesh::Pointer mesh, double point1[3], double point2[3]) {
-    const IGsize n = mesh->GetNumberOfPoints();
-    if (n <= 0) { return false; }
-    auto points = mesh->GetPoints();
+bool ResolveAutoAxis(Points::Pointer points, double point1[3], double point2[3]) {
     if (points == nullptr) { return false; }
+    const IGsize n = points->GetNumberOfPoints();
+    if (n <= 0) { return false; }
 
     Eigen::Vector3d mean = Eigen::Vector3d::Zero();
     for (IGsize i = 0; i < n; ++i) {
@@ -269,15 +371,49 @@ bool TextureMapToCylinderFilter::ExecuteInternal() {
         return false;
     }
 
-    // 统一转成 UnstructuredMesh 表示（SurfaceMesh / VolumeMesh 会新建转换）
-    UnstructuredMesh::Pointer um = UnstructuredMesh::TransDataObjToUnstructuredMesh(input);
-    if (um == nullptr) {
-        m_Message = "unsupported data type (support: UnstructuredMesh / SurfaceMesh / VolumeMesh)";
-        IGAME_CORE_ERROR("TextureMapToCylinderFilter: unsupported data type {}",
-                         static_cast<int>(input->GetDataObjectType()));
+    // ---- 0) 输入统一成「点 + 单元表 + 类型表」，几何原样带到输出 ----
+    //
+    // 这里没有直接调用通用的「转无结构网格」：它对表面网格只搬面表
+    // （SurfaceMesh::GetFaces），而读 .vtk 时 LINES 段是存放在边表
+    // （SurfaceMesh::GetEdges）里的 —— 走通用转换会把输入里的独立线段整段丢掉。
+    // 本过滤器只是在点数据上追加纹理坐标，不该删除任何原有几何，
+    // 因此表面网格单独走「面 + 独立线段」的转换路径。
+    Points::Pointer inPoints = nullptr;
+    CellArray::Pointer outCells = nullptr;
+    UnsignedIntArray::Pointer outTypes = nullptr;
+    IGsize looseEdgeCount = 0;
+
+    const IGenum inType = input->GetDataObjectType();
+    if (inType == IG_SURFACE_MESH) {
+        auto sm = DynamicCast<SurfaceMesh>(input);
+        if (sm == nullptr) {
+            m_Message = "input data claims to be a surface mesh but cannot be cast";
+            return false;
+        }
+        inPoints = sm->GetPoints();
+        BuildCellsWithLooseEdges(sm->GetFaces(), sm->GetEdges(), outCells, outTypes, looseEdgeCount);
+    } else {
+        // 无结构网格直接沿用；体网格等交给框架转换（它们不存在「面/边分离」的问题）
+        UnstructuredMesh::Pointer um =
+            (inType == IG_UNSTRUCTURED_MESH)
+                ? DynamicCast<UnstructuredMesh>(input)
+                : UnstructuredMesh::TransDataObjToUnstructuredMesh(input);
+        if (um == nullptr) {
+            m_Message = "unsupported data type (support: UnstructuredMesh / SurfaceMesh / VolumeMesh)";
+            IGAME_CORE_ERROR("TextureMapToCylinderFilter: unsupported data type {}",
+                             static_cast<int>(inType));
+            return false;
+        }
+        inPoints = um->GetPoints();
+        outCells = DeepCopyCellArray(um->GetCells());
+        outTypes = DeepCopyArray<UnsignedIntArray>(um->GetCellTypes());
+    }
+
+    if (inPoints == nullptr) {
+        m_Message = "input mesh has no point coordinates";
         return false;
     }
-    const IGsize numPoints = um->GetNumberOfPoints();
+    const IGsize numPoints = inPoints->GetNumberOfPoints();
     if (numPoints == 0) {
         // 没有点就无从生成纹理坐标：明确失败，绝不把原模型当结果返回
         m_Message = "input mesh has no points, there is no texture coordinate to generate";
@@ -290,7 +426,7 @@ bool TextureMapToCylinderFilter::ExecuteInternal() {
         m_Resolved2[i] = m_Point2[i];
     }
     if (m_Automatic) {
-        if (!ResolveAutoAxis(um, m_Resolved1, m_Resolved2)) {
+        if (!ResolveAutoAxis(inPoints, m_Resolved1, m_Resolved2)) {
             m_Message = "cannot determine a cylinder axis automatically (degenerate point cloud); "
                         "turn off automatic cylinder generation and specify Point1/Point2";
             return false;
@@ -305,18 +441,24 @@ bool TextureMapToCylinderFilter::ExecuteInternal() {
     }
     double axisUnit[3] = {axis[0] / axisLen, axis[1] / axisLen, axis[2] / axisLen};
 
-    // 参考方向 ref：与轴垂直，作为角度的 0 度基准（由 axis × (1,0,0) 构造）
+    // 参考方向 ref：与轴垂直，作为角度的 0 度基准（由 axisUnit × (1,0,0) 构造）
+    //
+    // 这里必须用**单位化后的轴**做叉乘：用未归一化的 axis 时，两次叉乘的结果长度会按
+    // |axis|² 缩小 —— 轴长 1e-6 时 ref 的长度只剩 1e-12，会被当成"轴退化"误判失败。
+    // 而轴长只决定 t 的量程，本来就不该影响能不能建立参考方向。
+    // 换成 axisUnit 后 ref 的方向与原来完全一致（都是归一化后的同向结果），
+    // 只是不再随轴长消失，短轴、长轴都能正常求纹理坐标。
     double probe[3] = {1.0, 0.0, 0.0};
     double tmp[3];
-    Cross3(axis, probe, tmp);
+    Cross3(axisUnit, probe, tmp);
     if (Norm3(tmp) <= kEps) {  // 轴与 X 平行时换 Y 做基准
         probe[0] = 0.0;
         probe[1] = 1.0;
         probe[2] = 0.0;
-        Cross3(axis, probe, tmp);
+        Cross3(axisUnit, probe, tmp);
     }
     double ref[3];
-    Cross3(tmp, axis, ref);
+    Cross3(tmp, axisUnit, ref);
     if (!Normalize3(ref)) {
         m_Message = "degenerate cylinder axis (cannot build a reference direction)";
         return false;
@@ -327,14 +469,15 @@ bool TextureMapToCylinderFilter::ExecuteInternal() {
     outMesh->SetName(input->GetName() + "_TCoords");
 
     auto outPoints = Points::New();
-    outPoints->DeepCopy(um->GetPoints());
+    outPoints->DeepCopy(inPoints);
     outMesh->SetPoints(outPoints);
 
-    auto outCells = DeepCopyCellArray(um->GetCells());
-    auto outTypes = DeepCopyArray<UnsignedIntArray>(um->GetCellTypes());
     if (outCells != nullptr) { outMesh->SetCells(outCells, outTypes); }
 
-    outMesh->SetAttributeSet(DeepCopyAttributes(input->GetAttributeSet(), m_ArrayName));
+    // 属性按输出单元数对齐后再挂上（点属性不受影响：点数没有变化）
+    const IGsize outCellCount = (outCells != nullptr) ? outCells->GetNumberOfCells() : 0;
+    outMesh->SetAttributeSet(
+        DeepCopyAttributes(input->GetAttributeSet(), m_ArrayName, outCellCount));
 
     // ---- 3) 逐点计算 (s, t) ----
     // 用 FloatArray / 2 分量 / 名字 "Texture Coordinates"
@@ -344,7 +487,7 @@ bool TextureMapToCylinderFilter::ExecuteInternal() {
     // Resize 收"元素个数"（内部再乘维度 2）
     tcoords->Resize(numPoints);
 
-    auto points = um->GetPoints();
+    auto points = inPoints;
     for (IGsize i = 0; i < numPoints; ++i) {
         auto p = points->GetPoint(i);
         const double x[3] = {static_cast<double>(p[0]), static_cast<double>(p[1]),
