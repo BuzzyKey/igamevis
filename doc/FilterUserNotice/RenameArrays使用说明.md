@@ -137,5 +137,5 @@ Examples/Filter/TestRenameArrays.cpp
 5. 只处理 `IG_POINT` / `IG_CELL`；没有 vertex 关联，字段数据（`Metadata`）不处理，输出不带字段数据。
 6. 不支持复合 / 多块数据集：`Execute()` 返回 `false` 并给出消息（`vtkArrayRename` 由 executive 逐块展开）。
 7. 按（关联, 下标）配置时，下标顺序等于 `AttributeSet` 的内部顺序，也就是面板左列的顺序；下标在 `Execute()` 时解析，因此「先配置、后 `SetInput`」同样有效。
-8. 直接调用 Filter 时输出会沿用输入的名字（`DeepCopyDataObject` 拷贝名字），建议自行 `SetName()`；通过面板执行时会自动命名为 `<输入名>_rename`。
+8. 直接调用 Filter 时输出会沿用输入的名字（filter 内部深拷贝会复制名字），建议自行 `SetName()`；通过面板执行时会自动命名为 `<输入名>_rename`。
 9. 数组的**数据范围**（着色用）会随数组一起深拷贝，改名不会改变取值范围；着色状态按属性下标保存，改名后仍然可用。
