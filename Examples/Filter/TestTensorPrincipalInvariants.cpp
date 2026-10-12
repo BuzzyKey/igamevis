@@ -5,11 +5,13 @@
 #include <cstdlib>
 #include <filesystem>
 #include <iGameAttributeSet.h>
+#include <iGameCellType.h>
 #include <iGameDrawObject.h>
 #include <iGameFileIO.h>
 #include <iGameFlatArray.h>
 #include <iGameInteractor.h>
 #include <iGameRenderWindow.h>
+#include <iGameSurfaceMesh.h>
 #include <iGameUnstructuredMesh.h>
 #include <iostream>
 #include <string>
@@ -59,6 +61,22 @@ iGame::UnstructuredMesh::Pointer LoadMesh(const std::string& fileName) {
         ++g_failed;
     }
     return mesh;
+}
+
+/// 读任意数据对象（不限定类型）：表面网格（POLYDATA）读出来是 SurfaceMesh，
+/// 与无结构网格一样要能交给过滤器处理。
+iGame::DataObject::Pointer LoadAny(const std::string& fileName) {
+    if (!std::filesystem::exists(fileName)) {
+        std::cerr << " [FAIL] model not found: " << fileName << "\n";
+        ++g_failed;
+        return nullptr;
+    }
+    iGame::DataObject::Pointer obj = iGame::FileIO::ReadFile(fileName);
+    if (obj == nullptr) {
+        std::cerr << " [FAIL] ReadFile returned null: " << fileName << "\n";
+        ++g_failed;
+    }
+    return obj;
 }
 
 iGame::ArrayObject::Pointer FindArray(iGame::DataObject::Pointer obj, const std::string& name,
@@ -454,6 +472,182 @@ void TestVectorSignConvention() {
     Check(ok, "principal direction signs follow the fixed convention on all 4 tuples");
 }
 
+/// 场景 8：表面网格里的独立线段必须保留（几何只增不减）
+/// POLYDATA 读进来是 SurfaceMesh：POLYGONS 落在面表、LINES 落在边表。
+/// 早期走通用的「转无结构网格」只会搬面表，独立线段被整段丢掉 —— 而本过滤器
+/// 只应追加结果数组，不该删除输入里的任何几何。
+void TestLooseLineSurfaceMesh() {
+    std::cerr << "[case 8] surface mesh keeps its separate line (geometry preserved)\n";
+    auto obj = LoadAny("./Models/TensorPrincipalInvariants_loose_line.vtk");
+    if (obj == nullptr) { return; }
+    Check(obj->GetDataObjectType() == IG_SURFACE_MESH, "input is a surface mesh (POLYDATA)");
+    auto sm = iGame::DynamicCast<iGame::SurfaceMesh>(obj);
+    Check(sm != nullptr && sm->GetNumberOfPoints() == 5, "input has 5 points");
+    Check(sm != nullptr && sm->GetNumberOfFaces() == 1 && sm->GetNumberOfEdges() == 1,
+          "input: 1 triangle face + 1 separate line");
+
+    auto filter = iGame::TensorPrincipalInvariantsFilter::New();
+    filter->SetTensorArrayName("stress");
+    filter->SetInput(obj);
+    Check(filter->Execute(), "Execute() returns true (message: " + filter->GetMessage() + ")");
+    auto out = iGame::DynamicCast<iGame::UnstructuredMesh>(filter->GetOutput());
+    if (out == nullptr) {
+        Check(false, "GetOutput() is an UnstructuredMesh");
+        return;
+    }
+    Check(out->GetNumberOfPoints() == 5, "all 5 points are preserved");
+    Check(out->GetNumberOfCells() == 2,
+          "the separate line is preserved (expected 2 cells, got " +
+              std::to_string(out->GetNumberOfCells()) + ")");
+
+    // 面在前、独立线段在后
+    auto types = out->GetCellTypes();
+    const bool typesOK =
+        (types != nullptr) && (types->GetNumberOfElements() == 2) &&
+        (types->GetValue(0) == static_cast<unsigned int>(iGame::IG_TRIANGLE)) &&
+        (types->GetValue(1) == static_cast<unsigned int>(iGame::IG_LINE));
+    Check(typesOK, "cell types are [triangle, line]");
+
+    // 结果数组照常生成（点数据）
+    Check(FindArray(out, ValName("stress", 1), IG_POINT) != nullptr &&
+              FindArray(out, VecName("stress", 1), IG_POINT) != nullptr,
+          "principal value / direction arrays are produced on point data");
+    Check(FindArray(obj, ValName("stress", 1), IG_POINT) == nullptr,
+          "input surface mesh is NOT modified");
+}
+
+/// 场景 9：整体很小（或很大）的张量，主方向必须不变
+/// 主值是相对量。早期用 1e-12*(1+scale) 做相等判断，那个绝对的「1」带来一条 1e-12
+/// 的地板：把张量整体乘 1e-14 后，本不相等的主值会被判成重根，主方向随即被替换成
+/// 坐标轴 —— 而把张量乘一个常数（换单位）不该改变主方向。
+void TestTinyScaleInvariance() {
+    std::cerr << "[case 9] tiny (rescaled) tensor keeps the same principal directions\n";
+    auto mesh = LoadMesh("./Models/TensorPrincipalInvariants_symmetric.vtk");
+    if (mesh == nullptr) { return; }
+
+    // 由模型张量整体乘 1e-14 造一个"小量级"张量：用 double 数组，避免 float 的精度损失
+    auto attrs = mesh->GetAttributeSet();
+    if (attrs == nullptr) {
+        Check(false, "input attribute set exists");
+        return;
+    }
+    const double src[4][6] = {
+        {3, 2, 1, 0, 0, 0}, {2, 2, 5, 1, 0, 0}, {2, 2, 2, 0, 0, 0}, {10, -2, -8, 4, 0, 0}};
+    const double kScale = 1e-14;
+    auto tiny = iGame::DoubleArray::New();
+    tiny->SetName("tiny");
+    tiny->SetDimension(6);
+    tiny->Resize(4);
+    for (int t = 0; t < 4; ++t) {
+        for (int c = 0; c < 6; ++c) { tiny->SetValue(t * 6 + c, kScale * src[t][c]); }
+    }
+    attrs->AddAttribute(IG_TENSOR, IG_POINT, tiny);
+
+    auto filter = iGame::TensorPrincipalInvariantsFilter::New();
+    filter->SetTensorArrayName("tiny");
+    filter->SetInput(mesh);
+    if (!filter->Execute()) {
+        Check(false, "Execute() returns true (message: " + filter->GetMessage() + ")");
+        return;
+    }
+    auto out = iGame::DynamicCast<iGame::UnstructuredMesh>(filter->GetOutput());
+    if (out == nullptr) {
+        Check(false, "GetOutput() is an UnstructuredMesh");
+        return;
+    }
+
+    std::vector<iGame::ArrayObject::Pointer> vecs, vals;
+    for (int i = 1; i <= 3; ++i) {
+        vecs.push_back(FindArray(out, VecName("tiny", i), IG_POINT));
+        vals.push_back(FindArray(out, ValName("tiny", i), IG_POINT));
+    }
+    bool exist = true;
+    for (int i = 0; i < 3; ++i) {
+        if (vecs[i] == nullptr || vals[i] == nullptr) { exist = false; }
+    }
+    Check(exist, "6 result arrays exist for the tiny tensor");
+    if (!exist) { return; }
+
+    // tuple1 = 1e-14 * [[2,1,0],[1,2,0],[0,0,5]] → 主值 1e-14*(5,3,1)，
+    // 主方向与原来一致：(0,0,1) / (0.7071,0.7071,0) / (0.7071,-0.7071,0)
+    const double expectVal[3] = {5.0 * kScale, 3.0 * kScale, 1.0 * kScale};
+    const double expectDir[3][3] = {{0.0, 0.0, 1.0},
+                                    {0.7071068, 0.7071068, 0.0},
+                                    {0.7071068, -0.7071068, 0.0}};
+    bool valOK = true, dirOK = true, residualOK = true;
+    for (int k = 0; k < 3; ++k) {
+        const double got = Comp(vals[k], 1, 0);
+        if (!Near(got, expectVal[k], 1e-6 * std::fabs(expectVal[k]))) { valOK = false; }
+        for (int c = 0; c < 3; ++c) {
+            if (!Near(Comp(vecs[k], 1, c), expectDir[k][c], 1e-6)) { dirOK = false; }
+        }
+    }
+    Check(valOK, "principal values scale with the tensor (1e-14 * 5,3,1)");
+    Check(dirOK, "principal directions are unchanged (second stays (0.7071,0.7071,0))");
+
+    // 语义证明：主方向必须满足 T·v = λ·v（相对张量量级）
+    double m[3][3];
+    BuildTensor(FindArray(mesh, "tiny", IG_POINT), 1, m);
+    for (int k = 0; k < 3; ++k) {
+        const double vx = Comp(vecs[k], 1, 0), vy = Comp(vecs[k], 1, 1),
+                     vz = Comp(vecs[k], 1, 2);
+        const double lam = Comp(vals[k], 1, 0);
+        for (int r = 0; r < 3; ++r) {
+            const double tv = m[r][0] * vx + m[r][1] * vy + m[r][2] * vz;
+            const double v = (r == 0) ? vx : ((r == 1) ? vy : vz);
+            if (std::fabs(tv - lam * v) > 1e-9 * (std::fabs(lam) + 1e-300)) {
+                residualOK = false;
+            }
+        }
+    }
+    Check(residualOK, "T * v == lambda * v holds for the tiny tensor (residual relative)");
+}
+
+/// 场景 10：计算点数据时，不能误删同名的单元数组
+/// 结果数组只写在点/单元中的一侧；另一侧同名的数组是用户数据，必须保留。
+/// 早期只按名字过滤旧结果，会把它们一起删掉。
+void TestSameNameCellArrayPreserved() {
+    std::cerr << "[case 10] a same-named CELL array survives a POINT tensor run\n";
+    auto mesh = LoadMesh("./Models/TensorPrincipalInvariants_symmetric.vtk");
+    if (mesh == nullptr) { return; }
+    auto attrs = mesh->GetAttributeSet();
+    if (attrs == nullptr) {
+        Check(false, "input attribute set exists");
+        return;
+    }
+    // 在单元数据上放一个与「点结果数组」同名的数组（1 个单元 → 1 个元素）
+    auto cellKeep = iGame::DoubleArray::New();
+    cellKeep->SetName(ValName("stress", 1));  // "stress - Sigma 1"
+    cellKeep->SetDimension(1);
+    cellKeep->Resize(1);
+    cellKeep->SetValue(0, 42.0);
+    attrs->AddScalar(IG_CELL, cellKeep);
+    Check(FindArray(mesh, ValName("stress", 1), IG_CELL) != nullptr,
+          "precondition: cell array 'stress - Sigma 1' exists on the input");
+
+    auto filter = iGame::TensorPrincipalInvariantsFilter::New();
+    filter->SetTensorArrayName("stress");  // 点数据
+    filter->SetInput(mesh);
+    Check(filter->Execute(), "Execute() returns true (message: " + filter->GetMessage() + ")");
+    auto out = iGame::DynamicCast<iGame::UnstructuredMesh>(filter->GetOutput());
+    if (out == nullptr) {
+        Check(false, "GetOutput() is an UnstructuredMesh");
+        return;
+    }
+    auto kept = FindArray(out, ValName("stress", 1), IG_CELL);
+    Check(kept != nullptr,
+          "the CELL array 'stress - Sigma 1' is preserved (not deleted by name)");
+    Check(kept != nullptr && Near(Comp(kept, 0, 0), 42.0, 1e-9),
+          "its value is untouched (42)");
+    Check(FindArray(out, ValName("stress", 1), IG_POINT) != nullptr,
+          "the POINT result array 'stress - Sigma 1' is written as usual");
+
+    // 反向确认：输出里点/单元两侧各有一个同名数组，互不干扰
+    Check(CountArrays(out, ValName("stress", 1), IG_CELL) == 1 &&
+              CountArrays(out, ValName("stress", 1), IG_POINT) == 1,
+          "exactly one cell array and one point array share the name");
+}
+
 /// 可视化演示：按第一主值伪彩着色（便于录屏对照）
 void VisualizeResult() {
     if (std::getenv("IGV_TEST_NO_VIEW") != nullptr) { return; }
@@ -499,6 +693,9 @@ int main() {
     TestFailureCases();
     TestRepeatedExecution();
     TestVectorSignConvention();
+    TestLooseLineSurfaceMesh();
+    TestTinyScaleInvariance();
+    TestSameNameCellArrayPreserved();
 
     if (g_failed == 0) {
         std::cerr << "[testTensorPrincipalInvariants] PASS: all checks passed\n";

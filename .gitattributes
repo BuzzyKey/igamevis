@@ -15,3 +15,5 @@ Examples/Models/OverlappingCellsDetectorValidation.vtk -filter -diff -merge text
 Examples/Models/OverlappingCellsDetectorFaceTouching.vtk -filter -diff -merge text
 Examples/Models/OutlineCorners_Plane.vtk -filter -diff -merge text
 Examples/Models/iGameValidateCellsFilter_mixed.vtk -filter -diff -merge text
+# Small text fixture for the TensorPrincipalInvariants standalone-line regression.
+Examples/Models/TensorPrincipalInvariants_loose_line.vtk -filter -diff -merge text

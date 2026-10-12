@@ -17,6 +17,7 @@
 #include <cmath>
 #include <exception>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -43,10 +44,17 @@ constexpr double kEps = 1e-12;
 // 因此可以直接接在 Eigen 的结果之后使用。
 // ------------------------------------------------------------------
 
-/// 浮点相等判断：留一点相对容差，吸收底层库的舍入差异
-inline bool NearlyEqual(double a, double b) {
-    const double scale = std::max(std::abs(a), std::abs(b));
-    return std::abs(a - b) <= 1e-12 * (1.0 + scale);
+/// 浮点相等判断：判断两个主值是否"数值上相等"，用于识别重根。
+///
+/// 容差只随被比较量的**量级**缩放，不带固定的绝对下限：
+/// 特征值本身是相对量，特征分解的误差也正比于张量的量级，所以重根判据必须
+/// 用相对容差。早先写成 `1e-12 * (1 + scale)`，那个「1」带来一条 1e-12 的绝对
+/// 地板 —— 当张量整体很小（例如同一张量整体乘 1e-14）时，本不相等的主值会被
+/// 判成相等，主方向随即被替换成坐标轴，而把张量乘一个常数（换单位）本不该
+/// 改变主方向。这里由调用方传入张量量级 scale，按 |a-b| <= 1e-12 * scale 判定。
+inline bool NearlyEqual(double a, double b, double scale) {
+    if (scale <= 0.0) { return a == b; }  // 零张量：三个主值精确为 0
+    return std::abs(a - b) <= 1e-12 * scale;
 }
 
 inline void Cross3(const double a[3], const double b[3], double out[3]) {
@@ -72,8 +80,14 @@ inline double Det3(const double v[3][3]) {
 
 /// 把主值 w[3] 与主方向 v[3][3]（v[i] = 第 i 个方向，行 = 向量）规范成固定的符号惯例
 inline void NormalizePrincipalDirections(double w[3], double v[3][3]) {
+    // 重根判定相对于张量自身的量级：三个主值里最大的绝对值就是对称张量的谱半径
+    // （也就是 2-范数），是这套相对容差最自然的尺度。这样「整体乘一个常数」不会
+    // 改变任何比较结果，主方向也就不会被量级影响。
+    const double tensorScale =
+        std::max(std::abs(w[0]), std::max(std::abs(w[1]), std::abs(w[2])));
+
     // 情形 1：三个主值全相等（各向同性）—— 方向不唯一，直接给单位阵
-    if (NearlyEqual(w[0], w[1]) && NearlyEqual(w[0], w[2])) {
+    if (NearlyEqual(w[0], w[1], tensorScale) && NearlyEqual(w[0], w[2], tensorScale)) {
         for (int i = 0; i < 3; ++i) {
             for (int j = 0; j < 3; ++j) { v[i][j] = (i == j) ? 1.0 : 0.0; }
         }
@@ -82,7 +96,7 @@ inline void NormalizePrincipalDirections(double w[3], double v[3][3]) {
 
     // 情形 2：两个主值相等 —— 该特征平面内方向不唯一，丢弃这对方向、用叉乘重建
     for (int i = 0; i < 3; ++i) {
-        if (NearlyEqual(w[(i + 1) % 3], w[(i + 2) % 3])) {
+        if (NearlyEqual(w[(i + 1) % 3], w[(i + 2) % 3], tensorScale)) {
             // 此时 v[i] 对应"单独的那个主值"
             int maxI = 0;
             double maxValue = std::abs(v[i][0]);
@@ -207,8 +221,18 @@ std::vector<std::string> OutputNames(const std::string& base) {
     return names;
 }
 
-/// 深拷贝属性集；跳过上一次执行写下的结果数组，保证重复执行不堆积
-AttributeSet::Pointer DeepCopyAttributes(AttributeSet::Pointer src, const std::string& baseName) {
+/// 深拷贝属性集；跳过上一次执行写下的结果数组，保证重复执行不堆积。
+///
+/// 过滤旧结果时必须**同时匹配挂载位置**（点 / 单元）：结果数组只写在 attachment
+/// 指定的那一侧，另一侧同名的数组是用户自己的数据，必须原样保留。只按名字过滤会
+/// 误删它们 —— 例如计算点数据 `stress` 时，会把原有的单元数组 `stress - Sigma 1`
+/// 一起删掉。
+///
+/// expectedCellCount > 0 时把「单元属性」的长度对齐到输出单元数：表面网格输入可能
+/// 带独立线段（输出单元数多于输入单元数），这些新增单元没有对应原始数据，按 0 补齐。
+/// 不对齐的话数组会比单元数短，后续按单元查询或着色会读到越界数据。
+AttributeSet::Pointer DeepCopyAttributes(AttributeSet::Pointer src, const std::string& baseName,
+                                         IGenum attachment, IGsize expectedCellCount = 0) {
     auto dst = AttributeSet::New();
     if (src == nullptr) { return dst; }
     const std::vector<std::string> skip = OutputNames(baseName);
@@ -219,15 +243,23 @@ AttributeSet::Pointer DeepCopyAttributes(AttributeSet::Pointer src, const std::s
         if (attr.isDeleted || attr.pointer == nullptr) { continue; }
         const std::string name = attr.pointer->GetName();
         bool isOldResult = false;
-        for (const auto& s : skip) {
-            if (s == name) {
-                isOldResult = true;
-                break;
+        if (attr.attachmentType == attachment) {
+            for (const auto& s : skip) {
+                if (s == name) {
+                    isOldResult = true;
+                    break;
+                }
             }
         }
         if (isOldResult) { continue; }
         auto copy = CopyAttribute(attr.pointer);
         if (copy == nullptr) { continue; }
+        // 单元属性对齐到输出单元数：前面的面沿用原值，新追加的独立线段补 0
+        // （FlatArray::Resize 走底层 vector::resize，新增元素会被值初始化为 0）
+        if (attr.attachmentType == IG_CELL && expectedCellCount > 0 &&
+            copy->GetNumberOfElements() < expectedCellCount) {
+            copy->Resize(expectedCellCount);
+        }
         DoubleArray::Pointer copyRange = nullptr;
         if (attr.dataRange != nullptr) {
             copyRange = DoubleArray::New();
@@ -262,6 +294,96 @@ CellArray::Pointer DeepCopyCellArray(CellArray::Pointer src) {
         dst->AddCellIds(ids.data(), vcnt);
     }
     return dst;
+}
+
+/// 收集一个单元表里所有单元的"无向边"，键为 (较小点索引 << 32) | 较大点索引
+void CollectCellEdges(CellArray::Pointer cells, std::unordered_set<unsigned long long>& out) {
+    if (cells == nullptr) { return; }
+    const IGsize n = cells->GetNumberOfCells();
+    std::vector<igIndex> ids(IGAME_CELL_MAX_SIZE, 0);
+    for (IGsize i = 0; i < n; ++i) {
+        const IGuint needed = cells->GetCellSize(i);
+        if (needed < 2) { continue; }  // 点单元没有边
+        if (ids.size() < needed) { ids.resize(needed); }
+        const int vcnt = cells->GetCellIds(i, ids.data());
+        if (vcnt < 2) { continue; }
+        for (int k = 0; k < vcnt; ++k) {
+            const igIndex a = ids[k];
+            const igIndex b = ids[(k + 1) % vcnt];
+            const igIndex lo = (a < b) ? a : b;
+            const igIndex hi = (a < b) ? b : a;
+            out.insert((static_cast<unsigned long long>(lo) << 32) |
+                       static_cast<unsigned long long>(hi));
+        }
+    }
+}
+
+/**
+ * 由「面表 + 边表」重建无结构网格的单元表与单元类型表，保留独立线段。
+ *
+ * 为什么需要它：读 .vtk 时 POLYGONS 落在表面网格的面表、LINES 落在它的边表，
+ * 而通用的「转无结构网格」只搬面表 —— 那些不属于任何面、作为独立线段存在的几何
+ * 会被整段丢掉。本过滤器只是追加一组主值 / 主方向数组，不应当改变输入的几何，
+ * 所以这里把独立线段识别出来一并带走。
+ *
+ * 独立线段的判定：先收集面单元的全部无向边，边表里「不在其中」的才算独立线段。
+ * 这样即使边表里混着由面派生出来的边（部分流程会调用 BuildEdges 填充边表），
+ * 也不会被当成独立几何重复输出。
+ *
+ * @param faces      面单元表（可为空）
+ * @param edges      边表（可为空，表面网格独有）
+ * @param outCells   [出] 新建的单元表
+ * @param outTypes   [出] 新建的单元类型表，与 outCells 一一对应
+ * @param looseEdges [出] 保留下来的独立线段条数
+ */
+void BuildCellsWithLooseEdges(CellArray::Pointer faces, CellArray::Pointer edges,
+                              CellArray::Pointer& outCells, UnsignedIntArray::Pointer& outTypes,
+                              IGsize& looseEdges) {
+    outCells = CellArray::New();
+    outTypes = UnsignedIntArray::New();
+    looseEdges = 0;
+
+    std::vector<igIndex> ids(IGAME_CELL_MAX_SIZE, 0);
+    std::vector<unsigned int> types;
+
+    // 1) 面：类型按顶点数判定（3 三角形 / 4 四边形 / 其余多边形）
+    if (faces != nullptr) {
+        const IGsize n = faces->GetNumberOfCells();
+        for (IGsize i = 0; i < n; ++i) {
+            const IGuint needed = faces->GetCellSize(i);
+            if (ids.size() < needed) { ids.resize(needed); }
+            const int vcnt = faces->GetCellIds(i, ids.data());
+            if (vcnt <= 0) { continue; }
+            outCells->AddCellIds(ids.data(), vcnt);
+            types.push_back(static_cast<unsigned int>(
+                vcnt == 3 ? IG_TRIANGLE : (vcnt == 4 ? IG_QUAD : IG_POLYGON)));
+        }
+    }
+
+    // 2) 边：只留下不属于任何面的那些，作为独立线段单元追加在面之后
+    if (edges != nullptr && edges->GetNumberOfCells() > 0) {
+        std::unordered_set<unsigned long long> faceEdges;
+        CollectCellEdges(faces, faceEdges);
+        const IGsize n = edges->GetNumberOfCells();
+        for (IGsize i = 0; i < n; ++i) {
+            if (edges->GetCellSize(i) != 2) { continue; }  // 独立线段按两点一条计
+            const int vcnt = edges->GetCellIds(i, ids.data());
+            if (vcnt != 2) { continue; }
+            const igIndex lo = (ids[0] < ids[1]) ? ids[0] : ids[1];
+            const igIndex hi = (ids[0] < ids[1]) ? ids[1] : ids[0];
+            const unsigned long long key = (static_cast<unsigned long long>(lo) << 32) |
+                                           static_cast<unsigned long long>(hi);
+            if (faceEdges.count(key) != 0) { continue; }  // 面的派生边，不是独立几何
+            outCells->AddCellIds(ids.data(), 2);
+            types.push_back(static_cast<unsigned int>(IG_LINE));
+            ++looseEdges;
+        }
+    }
+
+    outTypes->Resize(static_cast<IGsize>(types.size()));
+    for (size_t i = 0; i < types.size(); ++i) {
+        outTypes->SetValue(static_cast<IGsize>(i), types[i]);
+    }
 }
 
 /// 写结果前先删掉同名数组；必须同时匹配挂载类型（GetAttributeIndex 只按名字匹配）
@@ -370,12 +492,45 @@ bool TensorPrincipalInvariantsFilter::ExecuteInternal() {
         return false;
     }
 
-    // 统一转成 UnstructuredMesh 表示（SurfaceMesh / VolumeMesh 会新建转换）
-    UnstructuredMesh::Pointer um = UnstructuredMesh::TransDataObjToUnstructuredMesh(input);
-    if (um == nullptr) {
-        m_Message = "unsupported data type (support: UnstructuredMesh / SurfaceMesh / VolumeMesh)";
-        IGAME_CORE_ERROR("TensorPrincipalInvariantsFilter: unsupported data type {}",
-                         static_cast<int>(input->GetDataObjectType()));
+    // ---- 0) 输入统一成「点 + 单元表 + 类型表」，几何原样带到输出 ----
+    //
+    // 表面网格单独走「面 + 独立线段」这条路：读 .vtk 时 LINES 段落在表面网格的
+    // 边表（SurfaceMesh::GetEdges）、POLYGONS 段落在面表（SurfaceMesh::GetFaces），
+    // 而通用的「转无结构网格」只搬面表 —— 那些不属于任何面、作为独立线段存在的
+    // 几何会被整段丢掉。本过滤器只是在点/单元数据上追加主值 / 主方向数组，
+    // 不该删除任何原有几何，因此把独立线段一并带到输出。
+    Points::Pointer inPoints = nullptr;
+    CellArray::Pointer outCells = nullptr;
+    UnsignedIntArray::Pointer outTypes = nullptr;
+    IGsize looseEdgeCount = 0;
+
+    const IGenum inType = input->GetDataObjectType();
+    if (inType == IG_SURFACE_MESH) {
+        auto sm = DynamicCast<SurfaceMesh>(input);
+        if (sm == nullptr) {
+            m_Message = "input data claims to be a surface mesh but cannot be cast";
+            return false;
+        }
+        inPoints = sm->GetPoints();
+        BuildCellsWithLooseEdges(sm->GetFaces(), sm->GetEdges(), outCells, outTypes, looseEdgeCount);
+    } else {
+        // 无结构网格直接沿用；体网格等交给框架转换（它们不存在「面/边分离」的问题）
+        UnstructuredMesh::Pointer um =
+            (inType == IG_UNSTRUCTURED_MESH)
+                ? DynamicCast<UnstructuredMesh>(input)
+                : UnstructuredMesh::TransDataObjToUnstructuredMesh(input);
+        if (um == nullptr) {
+            m_Message = "unsupported data type (support: UnstructuredMesh / SurfaceMesh / VolumeMesh)";
+            IGAME_CORE_ERROR("TensorPrincipalInvariantsFilter: unsupported data type {}",
+                             static_cast<int>(inType));
+            return false;
+        }
+        inPoints = um->GetPoints();
+        outCells = DeepCopyCellArray(um->GetCells());
+        outTypes = DeepCopyArray<UnsignedIntArray>(um->GetCellTypes());
+    }
+    if (inPoints == nullptr) {
+        m_Message = "input mesh has no point coordinates";
         return false;
     }
 
@@ -406,23 +561,33 @@ bool TensorPrincipalInvariantsFilter::ExecuteInternal() {
         return false;
     }
 
-    const IGsize expect = (m_Attachment == IG_POINT)
-                              ? static_cast<IGsize>(um->GetNumberOfPoints())
-                              : static_cast<IGsize>(um->GetNumberOfCells());
+    const IGsize numPoints = static_cast<IGsize>(inPoints->GetNumberOfPoints());
+    const IGsize numCells = (outCells != nullptr) ? outCells->GetNumberOfCells() : 0;
+    const IGsize expect = (m_Attachment == IG_POINT) ? numPoints : numCells;
     if (expect == 0) {
         m_Message = (m_Attachment == IG_POINT) ? "input mesh has no points"
                                                : "input mesh has no cells";
         return false;
     }
-    if (static_cast<IGsize>(array->GetNumberOfElements()) != expect) {
-        // 长度不一致时不越界读、也不静默补零：明确失败
-        m_Message = "tensor array tuple count (" +
-                    std::to_string(array->GetNumberOfElements()) +
-                    ") does not match the mesh " +
-                    (m_Attachment == IG_POINT ? std::string("point count (")
-                                              : std::string("cell count (")) +
-                    std::to_string(expect) + ")";
-        return false;
+
+    const IGsize arrayCount = static_cast<IGsize>(array->GetNumberOfElements());
+    IGsize computable = expect;      // 真正有来源张量、需要逐元计算的元组数
+    if (arrayCount != expect) {
+        // 表面网格保留独立线段后，输出单元数 = 面单元数 + 线段数；而单元张量往往
+        // 只覆盖原有的面单元（线段是本次新增的几何，没有来源数据）。这种"恰好少掉
+        // 独立线段那一部分"的情况予以接受：线段单元写 NaN 并在执行信息里说明。
+        // 其余任何长度不符一律明确失败 —— 既不越界读，也不静默补零。
+        if (m_Attachment == IG_CELL && looseEdgeCount > 0 && arrayCount > 0 &&
+            arrayCount + looseEdgeCount == expect) {
+            computable = arrayCount;
+        } else {
+            m_Message = "tensor array tuple count (" + std::to_string(arrayCount) +
+                        ") does not match the mesh " +
+                        (m_Attachment == IG_POINT ? std::string("point count (")
+                                                  : std::string("cell count (")) +
+                        std::to_string(expect) + ")";
+            return false;
+        }
     }
 
     // ---- 2) 独立输出节点：点/单元/类型/属性全部深拷贝 ----
@@ -430,14 +595,12 @@ bool TensorPrincipalInvariantsFilter::ExecuteInternal() {
     outMesh->SetName(input->GetName() + "_PrincipalInvariants");
 
     auto outPoints = Points::New();
-    outPoints->DeepCopy(um->GetPoints());
+    outPoints->DeepCopy(inPoints);
     outMesh->SetPoints(outPoints);
 
-    auto outCells = DeepCopyCellArray(um->GetCells());
-    auto outTypes = DeepCopyArray<UnsignedIntArray>(um->GetCellTypes());
     if (outCells != nullptr) { outMesh->SetCells(outCells, outTypes); }
 
-    outMesh->SetAttributeSet(DeepCopyAttributes(inAttrs, m_ArrayName));
+    outMesh->SetAttributeSet(DeepCopyAttributes(inAttrs, m_ArrayName, m_Attachment, numCells));
 
     // ---- 3) 准备 6 个结果数组（顺序固定：先 3 个向量，再 3 个标量）----
     std::vector<DoubleArray::Pointer> vectors;
@@ -460,7 +623,21 @@ bool TensorPrincipalInvariantsFilter::ExecuteInternal() {
     // ---- 4) 逐元求主值与主方向 ----
     IGsize nanTuples = 0;
     IGsize failedTuples = 0;
+    IGsize noDataTuples = 0;
     for (IGsize i = 0; i < expect; ++i) {
+        if (i >= computable) {
+            // 独立线段单元：本次新增的几何，没有来源张量数据 → 写 NaN（不静默补 0），
+            // 并在执行信息里说明，界面上也能一眼看出这些单元没有主值。
+            for (int k = 0; k < 3; ++k) {
+                vectors[k]->SetValue(i * 3 + 0, std::nan(""));
+                vectors[k]->SetValue(i * 3 + 1, std::nan(""));
+                vectors[k]->SetValue(i * 3 + 2, std::nan(""));
+                values[k]->SetValue(i, std::nan(""));
+            }
+            ++noDataTuples;
+            continue;
+        }
+
         double comp[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
         bool hasNaN = false;
         for (int k = 0; k < dimension; ++k) {
@@ -552,13 +729,20 @@ bool TensorPrincipalInvariantsFilter::ExecuteInternal() {
         outAttrs->AddScalar(m_Attachment, values[k]);
     }
 
-    if (nanTuples > 0 || failedTuples > 0) {
-        // 不静默：把异常元组数写进执行信息，界面能看到
-        m_Message = "principal invariants computed; " + std::to_string(nanTuples) +
-                    " tuple(s) contain NaN" +
-                    (failedTuples > 0 ? (", " + std::to_string(failedTuples) +
-                                         " tuple(s) failed eigen decomposition")
-                                      : std::string());
+    if (nanTuples > 0 || failedTuples > 0 || noDataTuples > 0) {
+        // 不静默：把异常/无数据元组数写进执行信息，界面能看到
+        m_Message = "principal invariants computed";
+        if (noDataTuples > 0) {
+            m_Message += "; " + std::to_string(noDataTuples) +
+                         " loose-line cell(s) without tensor data (NaN)";
+        }
+        if (nanTuples > 0) {
+            m_Message += "; " + std::to_string(nanTuples) + " tuple(s) contain NaN";
+        }
+        if (failedTuples > 0) {
+            m_Message += "; " + std::to_string(failedTuples) +
+                         " tuple(s) failed eigen decomposition";
+        }
     }
 
     UpdateProgress(1);
