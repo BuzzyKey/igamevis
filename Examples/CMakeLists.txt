@@ -584,6 +584,7 @@ igame_add_example(testPlaneSamplingFilter Filter/TestPlaneSampling.cpp)
 igame_add_example(testExtractEnclosedPoints Filter/TestExtractEnclosedPoints.cpp)
 
 igame_add_example(TestTubeFilter Filter/Tube/TestTubeFilter.cpp)
+igame_add_example(TestSubdivideFilter Filter/Subdivide/TestSubdivideFilter.cpp)
 #        #5 +  е      #28    ײ       
 igame_add_example(testContourExtraction Filter/TestContourExtraction.cpp)
 igame_add_example(testModelGeometryParallelValidation Filter/ModelGeometryParallelValidation.cpp)
@@ -681,6 +682,7 @@ igame_add_example(testWarpByScalar Filter/WarpByScalar/TestWarpByScalar.cpp)
 igame_add_example(testPointCoordinates Filter/PointCoordinates/TestPointCoordinates.cpp)
 igame_add_example(testCellCenterFilter Filter/CellCenter/TestCellCenterFilter.cpp)
 igame_add_example(testExtractCellsByType Filter/MyFilter/TestExtractCellsByType.cpp)
+igame_add_example(TestValidateCellsFilter Filter/MyFilter/TestValidateCellsFilter.cpp)
 igame_add_example(testRandomVectors Filter/AttributeManipulation/TestRandomVectors.cpp)
 igame_add_example(testRemoveGhostInformation Filter/RemoveGhostInformation/TestRemoveGhostInformation.cpp)
 igame_add_example(testMaskPoints Filter/MaskPoints/TestMaskPoints.cpp)
@@ -702,6 +704,10 @@ igame_add_example(testForceStaticMesh Filter/ForceStaticMesh/TestForceStaticMesh
 
 # Append Attributes: merges point/cell attribute arrays from several inputs sharing the same layout.
 igame_add_example(testAppendAttributes Filter/AppendAttributes/TestAppendAttributes.cpp)
+
+# ReverseSense
+igame_add_example(testReverseSense Filter/ReverseSense/TestReverseSense.cpp)
+igame_add_example(testReverseSenseSelfCheck Filter/ReverseSense/TestReverseSenseSelfCheck.cpp)
 
 get_property(IGAME_EXAMPLE_TARGETS DIRECTORY PROPERTY IGAME_EXAMPLE_TARGETS)
 if (NOT IGAME_EXAMPLE_TARGETS)
