@@ -62,8 +62,8 @@ bool igQtMainWindow::connectImportedFilterAction(QAction* action, const QString&
         "cell_size", "count_cell_vertices", "extract_edges",
         "global_point_and_cell_ids", "point_and_cell_ids", "process_ids", "reflect",
         "axis_aligned_reflection", "extract_component", "merge_vector_components",
-        "resample_to_image", "resample_to_line", "resample_with_dataset", "rename_arrays",
-        "triangle_strips"};
+        "rename_arrays", "resample_to_image", "resample_to_line",
+        "resample_with_dataset", "triangle_strips"};
     if (!ids.contains(filterId)) return false;
 
     auto displayResult = [this](DataObject::Pointer output) {
@@ -194,14 +194,10 @@ bool igQtMainWindow::connectImportedFilterAction(QAction* action, const QString&
             }, modelTreeWidget);
             panel->BindCurrentModel();
         } else if (id == "resample_with_dataset") {
-            auto* panel = filterPanel<igQtResampleWithDataSet>(this, id, title, [&](auto*, auto*) {
-                // 面板自行管理输入与执行，这里不需要额外信号连接
-            }, modelTreeWidget);
+            auto* panel = filterPanel<igQtResampleWithDataSet>(this, id, title, [](auto*, auto*) {}, modelTreeWidget);
             panel->BindCurrentModel();
         } else if (id == "rename_arrays") {
-            auto* panel = filterPanel<igQtRenameArrays>(this, id, title, [&](auto*, auto*) {
-                // 面板自行管理输入与执行，这里不需要额外信号连接
-            }, modelTreeWidget);
+            auto* panel = filterPanel<igQtRenameArrays>(this, id, title, [](auto*, auto*) {}, modelTreeWidget);
             panel->BindCurrentModel();
         }
         showFilterPanel(this, id);
