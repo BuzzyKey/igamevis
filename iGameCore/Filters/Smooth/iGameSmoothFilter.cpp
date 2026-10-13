@@ -11,6 +11,50 @@ IGAME_NAMESPACE_BEGIN
 
 namespace {
 
+template<typename Array>
+ArrayObject::Pointer CopyArray(ArrayObject::Pointer source) {
+    auto output = Array::New();
+    if (!output->DeepCopy(DynamicCast<Array>(source))) return nullptr;
+    return output;
+}
+
+// 按原类型复制数组，保留整数精度
+ArrayObject::Pointer DeepCopyArray(ArrayObject::Pointer source) {
+    switch (source->GetArrayType()) {
+        case IG_FloatArray: return CopyArray<FloatArray>(source);
+        case IG_DoubleArray: return CopyArray<DoubleArray>(source);
+        case IG_IntArray: return CopyArray<IntArray>(source);
+        case IG_UnsignedIntArray: return CopyArray<UnsignedIntArray>(source);
+        case IG_CharArray: return CopyArray<CharArray>(source);
+        case IG_UnsignedCharArray: return CopyArray<UnsignedCharArray>(source);
+        case IG_ShortArray: return CopyArray<ShortArray>(source);
+        case IG_UnsignedShortArray: return CopyArray<UnsignedShortArray>(source);
+        case IG_LongLongArray: return CopyArray<LongLongArray>(source);
+        case IG_UnsignedLongLongArray: return CopyArray<UnsignedLongLongArray>(source);
+        default: return nullptr;
+    }
+}
+
+// 独立复制属性及范围状态
+AttributeSet::Pointer DeepCopyAttributes(AttributeSet* source) {
+    auto output = AttributeSet::New();
+    if (!source) return output;
+    for (IGsize i = 0; i < source->GetNumberOfAttributes(); ++i) {
+        auto attribute = source->GetAttribute(i);
+        if (attribute.pointer) {
+            attribute.pointer = DeepCopyArray(attribute.pointer);
+            if (!attribute.pointer) return nullptr;
+        }
+        if (attribute.dataRange) {
+            auto range = DoubleArray::New();
+            range->DeepCopy(attribute.dataRange);
+            attribute.dataRange = range;
+        }
+        output->GetAllAttributes()->AddElement(attribute);
+    }
+    return output;
+}
+
 // 逐单元复制连接关系
 CellArray::Pointer DeepCopyCellArray(CellArray* source) {
     auto output = CellArray::New();
@@ -136,8 +180,11 @@ bool SmoothFilter::Execute() {
     // 复制几何和属性，保持输入模型不变
     auto points = Points::New();
     points->DeepCopy(inputMesh->GetPoints());
-    auto attributes = AttributeSet::New();
-    if (input->GetAttributeSet()) attributes->DeepCopy(input->GetAttributeSet());
+    auto attributes = DeepCopyAttributes(input->GetAttributeSet());
+    if (!attributes) {
+        m_Message = "输入包含不支持复制的属性数组。";
+        return false;
+    }
     auto faces = DeepCopyCellArray(inputFaces);
     auto surface = SurfaceMesh::New();
     surface->SetPoints(points);

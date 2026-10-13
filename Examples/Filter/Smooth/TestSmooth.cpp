@@ -170,6 +170,8 @@ bool TestBoundaryMotionAndConvergence() {
                  "zero convergence disables early termination");
 }
 
+// 回归：混合面单元的整数属性曾丢失，检查独立复制和精度。
+// 修复提交主题：merge: 同步 main 并完善 Smooth 接入与属性复制
 bool TestMixedCellsAndAttributes() {
     using namespace iGame;
     auto fan = CreateFan();
@@ -189,6 +191,24 @@ bool TestMixedCellsAndAttributes() {
     cellValues->AddValue(9);
     input->GetAttributeSet()->AddScalar(IG_CELL, cellValues);
 
+    auto largeIds = LongLongArray::New();
+    largeIds->SetName("LargeIds");
+    largeIds->AddValue(9007199254740993LL);
+    largeIds->AddValue(-9007199254740993LL);
+    input->GetAttributeSet()->AddScalar(IG_CELL, largeIds);
+    auto range = DoubleArray::New();
+    range->SetDimension(2);
+    range->AddElement2(7.0, 9.0);
+    range->AddElement2(7.0, 9.0);
+    auto& cellAttribute = input->GetAttributeSet()->GetAttribute(1);
+    cellAttribute.dataRange = range;
+    cellAttribute.rangeLocked = true;
+    cellAttribute.rangeMode = AttributeSet::RangeMode::FixedGlobal;
+    cellAttribute.rangeLockedDimension = 0;
+    cellAttribute.runningMin = 7.0;
+    cellAttribute.runningMax = 9.0;
+    cellAttribute.runningRangeValid = true;
+
     auto filter = SmoothFilter::New();
     filter->SetInput(input);
     filter->SetPreserveBoundary(false);
@@ -199,9 +219,24 @@ bool TestMixedCellsAndAttributes() {
     if (!Check(output->GetCellTypes() != input->GetCellTypes() && output->GetCellType(0) == IG_QUAD &&
                output->GetCellType(1) == IG_TRIANGLE, "mixed cell types are preserved")) return false;
     if (!CheckAttributes(input->GetAttributeSet(), output->GetAttributeSet())) return false;
+    auto copiedIds = DynamicCast<LongLongArray>(output->GetAttributeSet()->GetAttribute(2).pointer);
+    if (!Check(copiedIds && copiedIds->RawPointer()[0] == largeIds->RawPointer()[0] &&
+               copiedIds->RawPointer()[1] == largeIds->RawPointer()[1],
+               "64-bit integer values preserve their exact precision")) return false;
+    const auto& copiedCell = output->GetAttributeSet()->GetAttribute(1);
+    if (!Check(!output->GetAttributeSet()->GetAttribute(0).dataRange &&
+               copiedCell.dataRange && copiedCell.dataRange != range &&
+               copiedCell.dataRange->GetValue(0) == 7.0 && copiedCell.dataRange->GetValue(1) == 9.0 &&
+               copiedCell.rangeLocked && copiedCell.rangeMode == cellAttribute.rangeMode &&
+               copiedCell.rangeLockedDimension == 0 && copiedCell.runningMin == 7.0 &&
+               copiedCell.runningMax == 9.0 && copiedCell.runningRangeValid,
+               "lazy ranges and cached range states are preserved independently")) return false;
+    copiedIds->RawPointer()[0] = 0;
+    copiedCell.dataRange->SetValue(0, -7.0);
     output->GetAttributeSet()->GetAttribute(0).pointer->SetValue(0, -1.0);
     output->SetPoint(0, Point(-1.0f, -1.0f, -1.0f));
-    return Check(pointValues->GetValue(0) == 0.25 && input->GetPoint(0) == Point(0.0f, 0.0f, 0.0f),
+    return Check(pointValues->GetValue(0) == 0.25 && largeIds->RawPointer()[0] == 9007199254740993LL &&
+                 range->GetValue(0) == 7.0 && input->GetPoint(0) == Point(0.0f, 0.0f, 0.0f),
                  "editing the output does not affect the input");
 }
 
