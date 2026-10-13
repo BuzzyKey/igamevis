@@ -486,12 +486,16 @@ void igQtModelTreeWidget::mousePressEvent(QMouseEvent* event) {
             syncVisibilityIcons();
             call = false;
         } else if (currentItem() != item) { // Check operation - only when clicking on the model itself
-            if (item->getModel() != iGame::SceneManager::Instance()->GetCurrentScene()->GetCurrentModel()) {
-                iGame::SceneManager::Instance()->GetCurrentScene()->SetCurrentModel(item->getModel());
-                emit ChangeCurrentModel(item->getModel());
-            }
-
+            // 点击顶层模型行：上下文切回该模型的根对象。
+            // 即使场景当前模型没变也要发信号刷新 —— 之前可能选中了子块，属性面板 /
+            // 信息框停在该子块的属性值上，需要按"选中优先、回落根"切回模型根对象。
+            // 顺序：先更新选中状态（本行成为 current），再发信号 —— 信号处理器
+            // 读取的是更新后的选中状态（GetCurrentDataObject）。
             item->setSelected(true);
+            setCurrentItem(item);
+            iGame::SceneManager::Instance()->GetCurrentScene()->SetCurrentModel(item->getModel());
+            emit ChangeCurrentModel(item->getModel());
+
             item->getModel()->ViewCloudPicture(-1);
             Q_EMIT ViewCloudPicture();
             auto* current = dynamic_cast<AttribTreeWidgetItem*>(item->getCurrentChild());
@@ -532,11 +536,24 @@ void igQtModelTreeWidget::mousePressEvent(QMouseEvent* event) {
                     syncVisibilityIcons();
                     call = false;
                 } else {
-                    if (auto* parent = dynamic_cast<ModelTreeWidgetItem*>(sub->parent())) {
-                        if (currentItem() != parent) {
-                            iGame::SceneManager::Instance()->GetCurrentScene()->SetCurrentModel(parent->getModel());
-                            emit ChangeCurrentModel(parent->getModel());
+                    // 点击子块行：上下文切到该子块（属性面板 / 信息框 / filter 输入源
+                    // 均按"选中优先、回落根"取对象）。
+                    // 顺序：先更新选中状态（子块行成为 current），再发信号 ——
+                    // 信号处理器读取的是更新后的选中状态；若先发信号，取到的还是
+                    // 上一次的选中（原实现即因此无法让属性面板切到子块）。
+                    // 嵌套多块时子块行可能挂在另一个子块行下 —— 向上找所属的顶层模型行。
+                    ModelTreeWidgetItem* rootModelItem = nullptr;
+                    for (QTreeWidgetItem* p = sub->parent(); p; p = p->parent()) {
+                        if (auto* modelItem = dynamic_cast<ModelTreeWidgetItem*>(p)) {
+                            rootModelItem = modelItem;
+                            break;
                         }
+                    }
+                    if (rootModelItem) {
+                        sub->setSelected(true);
+                        setCurrentItem(sub);
+                        iGame::SceneManager::Instance()->GetCurrentScene()->SetCurrentModel(rootModelItem->getModel());
+                        emit ChangeCurrentModel(rootModelItem->getModel());
                     }
 
                     auto scene = iGame::SceneManager::Instance()->GetCurrentScene();
@@ -571,11 +588,15 @@ void igQtModelTreeWidget::mousePressEvent(QMouseEvent* event) {
             int index = child->data(0, Qt::UserRole).toInt();
             ModelTreeWidgetItem* parent = dynamic_cast<ModelTreeWidgetItem*>(child->parent());
             if (parent) {
-                if (parent->getModel() != iGame::SceneManager::Instance()->GetCurrentScene()->GetCurrentModel()) {
-                    iGame::SceneManager::Instance()->GetCurrentScene()->SetCurrentModel(parent->getModelId());
+                // 点击模型的属性行：上下文切回该模型的根对象（此前可能选中了子块，
+                // 属性面板 / 信息框停在该子块的属性值上）。
+                // 顺序：先更新选中状态再发信号 —— 该属性行成为 current，但它本身
+                // 不是数据对象，信号处理器按"选中优先、回落根"取到模型根对象。
+                child->setSelected(true);
+                setCurrentItem(child);
+                iGame::SceneManager::Instance()->GetCurrentScene()->SetCurrentModel(parent->getModel());
+                emit ChangeCurrentModel(parent->getModel());
 
-                    emit ChangeCurrentModel(parent->getModel());
-                }
                 AttribTreeWidgetItem* current{nullptr};
                 if (parent->getCurrentChild()) {
                     current = dynamic_cast<AttribTreeWidgetItem*>(parent->getCurrentChild());

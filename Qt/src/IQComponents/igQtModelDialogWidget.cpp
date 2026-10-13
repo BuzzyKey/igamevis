@@ -932,6 +932,9 @@ QString igQtModelDialogWidget::renameModelRow(iGame::DataObject::Pointer obj, co
     // 用户看到的就是“转换后自动跳回第一帧”。改名只影响文字，模型信息面板直接刷新即可。
     obj->SetName(finalName.toStdString());
     item->setName(finalName);
+    // 信息框显示被改名的对象（与 updateCurrentModelInfo 的"当前对象覆盖"同口径；
+    // 若沿用上一次的 override，可能残留"此前选中的子块"）。
+    ui->ModelInformationWidget->setOverrideDataObject(obj);
     ui->ModelInformationWidget->updateInformationFrame();
     return finalName;
 }
@@ -1081,6 +1084,9 @@ int igQtModelDialogWidget::addModelToModelTree(iGame::Model::Pointer model) {
 int igQtModelDialogWidget::updateCurrentModelInfo() {
     //    qDebug() << ui->modelTreeWidget->currentIndex();
 
+    // 信息框按"当前选中对象"显示：选中子块时为子块本身，无选中回落模型根对象 ——
+    // 与属性面板、filter 输入源同源。
+    ui->ModelInformationWidget->setOverrideDataObject(GetCurrentDataObject());
     ui->ModelInformationWidget->updateInformationFrame();
     Q_EMIT CurrendModelChanged();
 
@@ -1101,7 +1107,9 @@ void igQtModelDialogWidget::updateCurrentModelProperty() {
         return;
     }
     //currentModel = model;
-    auto obj = DynamicCast<iGame::DrawObject>(model->GetDataObject());
+    // 显示"当前选中对象"的显示属性：选中子块时为子块本身，无选中时回落模型根对象 ——
+    // 与 filter 输入源同源（GetCurrentDataObject），选中语义全 UI 统一。
+    auto obj = DynamicCast<iGame::DrawObject>(GetCurrentDataObject());
     if (obj) {
         prop_PointSize->setEnabled(true);
         prop_PointSize->setValue(obj->GetPointSize());
@@ -1123,7 +1131,8 @@ void igQtModelDialogWidget::updateCurrentModelProperty(iGame::Model* model) {
     scene->SetCurrentModel(model);
 
     //currentModel = model;
-    auto obj = DynamicCast<iGame::DrawObject>(model->GetDataObject());
+    // 同上：显示"当前选中对象"的显示属性（选中子块时为子块本身，无选中回落根对象）。
+    auto obj = DynamicCast<iGame::DrawObject>(GetCurrentDataObject());
     if (obj) {
         prop_PointSize->setEnabled(true);
         prop_PointSize->setValue(obj->GetPointSize());
@@ -1206,33 +1215,27 @@ void igQtModelDialogWidget::deleteCurrentModel() {
 }
 
 void igQtModelDialogWidget::onPropertyChanged(QtProperty* property, const QVariant& value) {
-    auto currentModel = GetCurrentModel();
+    // 写入目标与属性面板的显示对象同源：选中子块时即子块本身，无选中回落模型根对象。
+    // （面板显示谁，改动就写回谁 —— 避免"看到子块的值、却改到根对象"的错位。）
+    auto obj = DynamicCast<iGame::DrawObject>(GetCurrentDataObject());
+    if (!obj) { return; }
     if (property == prop_PointSize) {
         //std::cout << value.toInt() << std::endl;
-        if (currentModel) {
-            auto obj = DynamicCast<iGame::DrawObject>(currentModel->GetDataObject());
-            if (obj && obj->GetPointSize() != value.toInt() && value.toInt() > 0) {
-                obj->SetPointSize(value.toInt());
-                Update();
-            }
+        if (obj->GetPointSize() != value.toInt() && value.toInt() > 0) {
+            obj->SetPointSize(value.toInt());
+            Update();
         }
     } else if (property == pror_LineWidth) {
         //std::cout << value.toDouble() << std::endl;
-        if (currentModel) {
-            auto obj = DynamicCast<iGame::DrawObject>(currentModel->GetDataObject());
-            if (obj && obj->GetLineWidth() != value.toInt() && value.toInt() > 0) {
-                obj->SetLineWidth(value.toInt());
-                Update();
-            }
+        if (obj->GetLineWidth() != value.toInt() && value.toInt() > 0) {
+            obj->SetLineWidth(value.toInt());
+            Update();
         }
     } else if (property == prop_Transparency) {
         //std::cout << value.toDouble() << std::endl;
-        if (currentModel) {
-            auto obj = DynamicCast<iGame::DrawObject>(currentModel->GetDataObject());
-            if (obj && obj->GetTransparency() != value.toDouble() && value.toDouble() >= 0 && value.toDouble() <= 1.0) {
-                obj->SetTransparency(value.toFloat());
-                Update();
-            }
+        if (obj->GetTransparency() != value.toDouble() && value.toDouble() >= 0 && value.toDouble() <= 1.0) {
+            obj->SetTransparency(value.toFloat());
+            Update();
         }
     }
 }
