@@ -1974,13 +1974,11 @@ void igQtMainWindow::initAllFilters() {
     };
 
     auto currentFilterInput = [this](const QString& title) -> DataObject::Pointer {
-        if (rendererWidget->GetScene()->GetCurrentModel() == nullptr) {
-            showDarkFramelessMessage(title, QStringLiteral("请先加载并选择一个模型。"));
-            return nullptr;
-        }
-        auto obj = rendererWidget->GetScene()->GetCurrentModel()->GetDataObject();
+        // P2-2：优先取模型树【当前选中】的数据对象 —— 选中多块装配体的子块时返回子块本身，
+        // 无任何选中时回落为当前模型的根 DataObject（见 igQtModelDialogWidget::GetCurrentDataObject）。
+        auto obj = modelTreeWidget->GetCurrentDataObject();
         if (!obj) {
-            showDarkFramelessMessage(title, QStringLiteral("当前模型没有可用数据。"));
+            showDarkFramelessMessage(title, QStringLiteral("请先加载并选择一个模型。"));
             return nullptr;
         }
         return obj;
@@ -4181,11 +4179,10 @@ void igQtMainWindow::initAllFilters() {
 
                 // 5) 【不隐藏原始输入】。
                 //
-                //    组的子块就是原模型对象本身（共享指针），而可见性存在 DataObject 上 ——
-                //    "隐藏原模型"会连带把组的内容一起隐藏，导致场景空白。
-                //    按「共享指针 = 共享显隐」的默认逻辑：原模型保持原状，
-                //    组只是多一层组织节点；在任意一处切换显隐，另一处的眼睛图标
-                //    由 syncVisibilityIcons() 保持一致。
+                //    组的每个子块都是原模型的【深拷贝克隆】（几何 / 属性 / 显隐样式各持一份），
+                //    隐藏原模型不会影响组的内容，隐藏组内的块也不会影响原模型 —— 新旧完全独立。
+                //    因此原模型保持原状即可；这里仅刷新全树眼睛图标，让每处图标都反映
+                //    各自对象的真实显隐状态。
                 modelTreeWidget->RefreshModelTreeVisibilityIcons();
 
                 rendererWidget->update();
@@ -4203,8 +4200,8 @@ void igQtMainWindow::initAllFilters() {
                                        "• 已合并对象数：%1 个\n"
                                        "• 输出节点：%2\n"
                                        "• 子块清单：%3\n\n"
-                                       "组的子块与原模型是同一份数据，显隐天然联动：\n"
-                                       "在任意一处切换，另一处的眼睛图标会同步更新。")
+                                       "组的子块是原模型的独立拷贝（数据与显隐互不牵连）：\n"
+                                       "修改组内的块或隐藏原模型，都不会影响对方。")
                                 .arg(filter->GetGroupedCount())
                                 .arg(QString::fromStdString(groupName))
                                 .arg(blockList);

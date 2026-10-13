@@ -121,12 +121,10 @@ bool AnySubDataObjectVisible(const iGame::DataObject::Pointer& obj) {
 } // namespace
 
 bool ModelTreeWidgetItem::getVisibility() const {
-    // 以「模型在画面上是否真的可见」为准，而不是本节点自己的 visibility 成员。
-    //
-    // 两层原因：
-    //  1) 同一个 DataObject 可能同时挂在顶层模型节点和某个容器模型的子块节点下，
-    //     两处共享同一份可见性。若这里读各自的成员变量就会状态漂移 ——
-    //     在子块节点处隐藏后，顶层节点仍以为自己是"亮"的，用户点它的眼睛得点两次才生效。
+    // 以「模型在画面上是否真的可见」为准，而不是本节点自己的 visibility 成员：
+    //  1) 节点成员只在 show()/hide() 时更新，一旦显隐从其他路径被改变就会过时；
+    //     直接读渲染对象的真实状态则永远自洽（组内子块是原模型的深拷贝克隆，
+    //     显隐各自独立，同样按真实状态读即可）。
     //  2) 容器模型（多块）不绘制自身，只绘制子块。因此它的图标必须看【子树】：
     //     隐藏任一个子块后，容器的图标要跟着变，否则就会出现
     //     "子块眼睛灭了、外层图标还亮着"的不一致。
@@ -353,6 +351,18 @@ std::vector<iGame::DataObject::Pointer> igQtModelTreeWidget::getSelectedDataObje
 }
 
 iGame::DataObject::Pointer igQtModelTreeWidget::getSingleSelectedDataObject() const {
+    // 多选时以 currentItem（最后点击 / 键盘移动到的那个）为准 —— selectedItems() 的返回顺序
+    // 依赖内部选择模型的实现细节，不保证与用户点击顺序一致。
+    if (auto* current = currentItem()) {
+        if (auto* modelItem = dynamic_cast<ModelTreeWidgetItem*>(current)) {
+            if (modelItem->getModel() && modelItem->getModel()->GetDataObject()) {
+                return modelItem->getModel()->GetDataObject();
+            }
+        } else if (auto* subItem = dynamic_cast<SubObjectTreeWidgetItem*>(current)) {
+            if (subItem->getDataObject()) { return subItem->getDataObject(); }
+        }
+    }
+    // currentItem 不是数据对象行（如属性行）时，回落为任意一个选中的数据对象。
     auto objs = getSelectedDataObjects();
     return objs.empty() ? nullptr : objs.front();
 }
@@ -470,8 +480,9 @@ void igQtModelTreeWidget::mousePressEvent(QMouseEvent* event) {
         if (clickedOnIndicator) {
         } else if (eyeRect.contains(event->pos())) {
             item->changeVisibility();
-            // 同一个 DataObject 可能同时挂在【顶层模型节点】和【组合模型的子块节点】下，
-            // 两者共享同一份可见性 —— 因此每次切换后同步【全树】图标，避免两处自相矛盾。
+            // 切换后同步【全树】图标：顶层模型的显隐会递归作用到多块子块（Model::Hide()），
+            // 展开出的子块行图标必须跟着刷新。syncVisibilityIcons() 统一按各对象真实的
+            // GetVisibility() 重刷图标，只刷图标、不传播状态（组内克隆与原模型显隐互相独立）。
             syncVisibilityIcons();
             call = false;
         } else if (currentItem() != item) { // Check operation - only when clicking on the model itself
@@ -515,8 +526,9 @@ void igQtModelTreeWidget::mousePressEvent(QMouseEvent* event) {
                 const QRect subIndicator(0, eyeRect.top(), indentation() * (subLevel + 1), eyeRect.height());
                 if (!subIndicator.contains(event->pos()) && eyeRect.contains(event->pos())) {
                     sub->changeVisibility();
-                    // 子块与顶层原模型往往指向同一个 DataObject（共享指针）——
-                    // 这里必须同步【全树】图标，否则会出现"子块眼睛灭了、原模型眼睛还亮着"。
+                    // 子块的显隐会影响其所属容器（组）的图标判定 —— 容器不绘制自身，
+                    // 图标以【子树中是否还有可见节点】为准（见 ModelTreeWidgetItem::getVisibility）。
+                    // 这里统一重刷全树图标，让容器行与各子块行都反映真实状态。
                     syncVisibilityIcons();
                     call = false;
                 } else {
