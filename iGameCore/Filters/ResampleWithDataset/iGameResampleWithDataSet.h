@@ -22,9 +22,12 @@ IGAME_NAMESPACE_BEGIN
  * @brief 重采样至数据集（对标 ParaView / VTK 的 Resample With Dataset）
  *
  * 两个输入，语义与 vtkProbeFilter 一致。**注意 VTK 的命名与直觉相反**：
- *   - 输入 0「被采样网格」= VTK 的 **Source**：提供数据的网格。它的点数据被插值到采样点上；
- *     它的单元数据按「采样点落在哪个单元」拷到采样点上。非 UnstructuredMesh 的类型会先
- *     转换成 UnstructuredMesh 再参与单元定位与插值。
+ *   - 输入 0「被采样网格」= VTK 的 **Source**：提供数据的网格。只有它的**点数据**被插值到
+ *     采样点上；它的**单元数据不进入输出**，单元只用于判断采样点落在哪个单元。
+ *     输入会先归一化为一份 UnstructuredMesh 再参与定位与插值：PointSet（每点一个顶点单元）、
+ *     SurfaceMesh、VolumeMesh、StructuredMesh（按 (ni,nj,nk) 生成 QUAD / HEXAHEDRON）、
+ *     LagrangeUnstructuredMesh 直接转换；容器网格（DrawObject / CompositeDataObject / 带子数据
+ *     对象的多帧时间序列、多 zone 文件）递归展开后合并为一份网格（多块等价先做 Merge Blocks）。
  *   - 输入 1「采样点网格」= VTK 的 **Input**：探针几何。它的**所有点**就是采样位置，
  *     并且它的几何与拓扑会被原样**深拷贝**成输出。
  *
@@ -33,10 +36,11 @@ IGAME_NAMESPACE_BEGIN
  *     VolumeMesh / StructuredMesh），类型与输入 1 保持一致；
  *   - 属性：
  *     ① 输入 0 的点数据插值到输出点上；
- *     ② 输入 0 的单元数据按命中单元拷到输出点上（与 vtkProbeFilter 一致；若同一名字
- *        同时存在于输入 0 的点数据与单元数据，只取点数据）；
- *     ③ validpointmask（UnsignedCharArray，1 = 该采样点插值成功，0 = 无效；无效点的
+ *     ② validpointmask（UnsignedCharArray，1 = 该采样点插值成功，0 = 无效；无效点的
  *        各插值属性填 0）；
+ *     （不包含）输入 0 的单元数据：本实现**不**把被采样网格的单元数组带到输出上
+ *     （vtkProbeFilter 会把源单元数组拷成输出的点数据，这里按需求去掉：输出只含插值后的
+ *     点数据与 validpointmask）；
  *     （不包含）输入 1 自身的属性数组：本实现不复制「采样点网格」自带的数组，
  *     与 vtkProbeFilter 的默认值 PassPointArrays = 0 / PassCellArrays = 0 一致。
  *
@@ -161,14 +165,9 @@ private:
     double DistanceToCellBoundary(const UnstructuredMesh::Pointer& mesh, igIndex cellId, const Point& p, Point& closest);
 
     /* ---------------- 属性处理 ---------------- */
-    /** 输入 0 的点数据 → 输出点；producedPointNames 记录已产出的数组名 */
+    /** 输入 0 的点数据 → 输出点（被采样网格的单元数据不参与输出） */
     void InterpolatePointData(AttributeSet* inSet, AttributeSet::Pointer outSet,
-                              const std::vector<SampleLocation>& locations, int sampleNum,
-                              std::vector<std::string>& producedPointNames);
-    /** 输入 0 的单元数据按命中单元 → 输出点；pointNames 中的名字（源点数据）优先，同名跳过 */
-    void CopyCellData(AttributeSet* inSet, AttributeSet::Pointer outSet,
-                      const std::vector<SampleLocation>& locations, int sampleNum,
-                      const std::vector<std::string>& pointNames);
+                              const std::vector<SampleLocation>& locations, int sampleNum);
     void AddValidPointMask(AttributeSet::Pointer outSet, int sampleNum);
 
     ResampleWithDataSet() {

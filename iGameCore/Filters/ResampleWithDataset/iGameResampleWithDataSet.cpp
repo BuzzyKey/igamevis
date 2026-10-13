@@ -2,6 +2,7 @@
 
 #include "iGameAttributeSet.h"
 #include "iGameCellArray.h"
+#include "iGameCompositeDataObject.h"
 #include "iGameLagrangeUnstructuredMesh.h"
 #include "iGamePointSet.h"
 #include "iGameStructuredMesh.h"
@@ -1684,6 +1685,414 @@ int LinearCornerVolumeCell(IGenum cellType, Cell::Pointer& cell) {
     }
 }
 
+/* ================================================================== */
+/* 输入归一化：被采样网格（任意受支持网格 / 容器）→ UnstructuredMesh     */
+/*                                                                    */
+/* ParaView 的 Resample With Dataset 直接接受任意 vtkDataSet，并逐块展开 */
+/* 复合数据集；这里补齐同样的能力，否则结构化网格 / 点云 / 时间序列这类   */
+/* 容器会以「无法转换为 UnstructuredMesh」失败（ResampleToLine 已有同样  */
+/* 的归一化内核）。                                                     */
+/* ================================================================== */
+
+/** 数据对象类型名，用于失败 / 结果消息 */
+const char* SourceTypeName(IGenum type) {
+    switch (type) {
+        case IG_DATA_OBJECT: return "DataObject";
+        case IG_COMPOSITE_DATA_OBJECT: return "CompositeDataObject";
+        case IG_DRAW_OBJECT: return "DrawObject";
+        case IG_POINT_SET: return "PointSet";
+        case IG_SURFACE_MESH: return "SurfaceMesh";
+        case IG_VOLUME_MESH: return "VolumeMesh";
+        case IG_UNSTRUCTURED_MESH: return "UnstructuredMesh";
+        case IG_STRUCTURED_MESH: return "StructuredMesh";
+        case IG_MULTIBLOCK_MESH: return "MultiBlockMesh";
+        case IG_SPLINE_GEOMETRY: return "SplineGeometry";
+        case IG_LAGRANGE_UNSTRUCTURED_MESH: return "LagrangeUnstructuredMesh";
+        default: return "Unknown";
+    }
+}
+
+/** 结构化网格点索引：i 变化最快，其次 j，最后 k（与 iGameStructuredMesh 一致） */
+inline igIndex StructuredPointId(const igIndex n[3], igIndex i, igIndex j, igIndex k) {
+    return i + j * n[0] + k * n[0] * n[1];
+}
+
+/**
+ * StructuredMesh → UnstructuredMesh
+ *
+ * 按 (ni, nj, nk) 中「尺寸大于 1 的维数」生成单元：
+ *   0 维 → IG_VERTEX（单点）；1 维 → IG_LINE（曲线）；2 维 → IG_QUAD（平面）；3 维 → IG_HEXAHEDRON。
+ * 节点序与 StructuredMesh::GenStructuredCellConnectivities() 保持一致。这里不修改输入网格，
+ * 也不依赖其连接关系是否已经生成。
+ */
+UnstructuredMesh::Pointer MeshFromStructured(StructuredMesh* structured) {
+    if (structured == nullptr || structured->GetPoints() == nullptr) { return nullptr; }
+
+    igIndex n[3] = {1, 1, 1};
+    igIndex* size = structured->GetDimensionSize();
+    if (size != nullptr) {
+        for (int a = 0; a < 3; ++a) { n[a] = std::max<igIndex>(1, size[a]); }
+    }
+    if (structured->GetNumberOfPoints() < n[0] * n[1] * n[2]) { return nullptr; }
+
+    auto mesh = UnstructuredMesh::New();
+    mesh->SetName(structured->GetName());
+    mesh->SetPoints(structured->GetPoints());
+    mesh->SetAttributeSet(structured->GetAttributeSet());
+
+    auto cells = CellArray::New();
+    auto types = UnsignedIntArray::New();
+    const auto pid = [&n](igIndex i, igIndex j, igIndex k) { return StructuredPointId(n, i, j, k); };
+
+    int varying[3] = {0, 0, 0};
+    int nv = 0;
+    for (int a = 0; a < 3; ++a) {
+        if (n[a] > 1) { varying[nv++] = a; }
+    }
+
+    if (nv == 0) {
+        // 仅一个点
+        igIndex id = 0;
+        cells->AddCellIds(&id, 1);
+        types->AddValue(IG_VERTEX);
+    } else if (nv == 1) {
+        // 1D 曲线
+        const int a = varying[0];
+        for (igIndex t = 0; t + 1 < n[a]; ++t) {
+            igIndex c[3] = {0, 0, 0};
+            igIndex id[2];
+            c[a] = t;
+            id[0] = pid(c[0], c[1], c[2]);
+            c[a] = t + 1;
+            id[1] = pid(c[0], c[1], c[2]);
+            cells->AddCellIds(id, 2);
+            types->AddValue(IG_LINE);
+        }
+    } else if (nv == 2) {
+        // 2D 平面（含 (1, nj, nk) 这类退化排布）
+        const int a = varying[0], b = varying[1];
+        for (igIndex tb = 0; tb + 1 < n[b]; ++tb) {
+            for (igIndex ta = 0; ta + 1 < n[a]; ++ta) {
+                igIndex c[3] = {0, 0, 0};
+                igIndex id[4];
+                c[a] = ta;
+                c[b] = tb;
+                id[0] = pid(c[0], c[1], c[2]);
+                c[a] = ta + 1;
+                id[1] = pid(c[0], c[1], c[2]);
+                c[b] = tb + 1;
+                id[2] = pid(c[0], c[1], c[2]);
+                c[a] = ta;
+                id[3] = pid(c[0], c[1], c[2]);
+                cells->AddCellIds(id, 4);
+                types->AddValue(IG_QUAD);
+            }
+        }
+    } else {
+        // 3D 六面体
+        for (igIndex k = 0; k + 1 < n[2]; ++k) {
+            for (igIndex j = 0; j + 1 < n[1]; ++j) {
+                for (igIndex i = 0; i + 1 < n[0]; ++i) {
+                    igIndex id[8];
+                    id[0] = pid(i, j, k);
+                    id[1] = pid(i + 1, j, k);
+                    id[2] = pid(i + 1, j, k + 1);
+                    id[3] = pid(i, j, k + 1);
+                    id[4] = pid(i, j + 1, k);
+                    id[5] = pid(i + 1, j + 1, k);
+                    id[6] = pid(i + 1, j + 1, k + 1);
+                    id[7] = pid(i, j + 1, k + 1);
+                    cells->AddCellIds(id, 8);
+                    types->AddValue(IG_HEXAHEDRON);
+                }
+            }
+        }
+    }
+
+    mesh->SetCells(cells, types);
+    return mesh;
+}
+
+/** PointSet（点云）→ UnstructuredMesh：每个点一个 IG_VERTEX 单元（等价 vtkPolyData 的 verts） */
+UnstructuredMesh::Pointer MeshFromPointSet(PointSet* pointSet) {
+    if (pointSet == nullptr || pointSet->GetPoints() == nullptr) { return nullptr; }
+
+    auto mesh = UnstructuredMesh::New();
+    mesh->SetName(pointSet->GetName());
+    mesh->SetPoints(pointSet->GetPoints());
+    mesh->SetAttributeSet(pointSet->GetAttributeSet());
+
+    auto cells = CellArray::New();
+    auto types = UnsignedIntArray::New();
+    const IGsize pointNum = pointSet->GetNumberOfPoints();
+    for (IGsize i = 0; i < pointNum; ++i) {
+        igIndex id = static_cast<igIndex>(i);
+        cells->AddCellIds(&id, 1);
+        types->AddValue(IG_VERTEX);
+    }
+    mesh->SetCells(cells, types);
+    return mesh;
+}
+
+/** LagrangeUnstructuredMesh → UnstructuredMesh：保留 IG_LAGRANGE_* 单元类型 */
+UnstructuredMesh::Pointer MeshFromLagrange(LagrangeUnstructuredMesh* lagrange) {
+    if (lagrange == nullptr || lagrange->GetPoints() == nullptr) { return nullptr; }
+
+    auto mesh = UnstructuredMesh::New();
+    mesh->SetName(lagrange->GetName());
+    mesh->SetPoints(lagrange->GetPoints());
+    mesh->SetAttributeSet(lagrange->GetAttributeSet());
+
+    auto cells = CellArray::New();
+    auto types = UnsignedIntArray::New();
+    const IGsize cellNum = lagrange->GetNumberOfCells();
+    for (IGsize c = 0; c < cellNum; ++c) {
+        const igIndex* ids = nullptr;
+        const int cnt = lagrange->GetCellPointIds(c, ids);
+        // 即使单元退化也要占位，保证单元序号与 Cell Data 对齐
+        cells->AddCellIds((cnt > 0) ? ids : nullptr, std::max(0, cnt));
+        types->AddValue(lagrange->GetSpecificCellType(c));
+    }
+    mesh->SetCells(cells, types);
+    return mesh;
+}
+
+/** 多块合并时需要的属性布局（同名 + 同附着类型视为同一个输出属性） */
+struct SourceAttributeLayout {
+    std::string name;
+    IGenum type{IG_NONE};
+    IGenum attachmentType{IG_POINT};
+    IGenum arrayType{IG_FloatArray};
+    int dimension{1};
+};
+
+void CollectSourceAttributeLayout(AttributeSet* set, std::vector<SourceAttributeLayout>& layouts) {
+    if (set == nullptr) { return; }
+    auto all = set->GetAllAttributes();
+    if (all == nullptr) { return; }
+
+    for (IGsize i = 0; i < all->GetNumberOfElements(); ++i) {
+        auto& attr = all->GetElement(i);
+        if (attr.isDeleted || attr.pointer == nullptr) { continue; }
+        if (attr.attachmentType != IG_POINT && attr.attachmentType != IG_CELL) { continue; }
+        const int dim = attr.pointer->GetDimension();
+        if (dim <= 0) { continue; }
+
+        bool found = false;
+        for (auto& layout : layouts) {
+            if (layout.name == attr.pointer->GetName() && layout.attachmentType == attr.attachmentType) {
+                layout.dimension = std::max(layout.dimension, dim);
+                found = true;
+                break;
+            }
+        }
+        if (found) { continue; }
+
+        SourceAttributeLayout layout;
+        layout.name = attr.pointer->GetName();
+        layout.type = attr.type;
+        layout.attachmentType = attr.attachmentType;
+        layout.arrayType = attr.pointer->GetArrayType();
+        layout.dimension = dim;
+        layouts.push_back(std::move(layout));
+    }
+}
+
+/**
+ * 多块网格合并为一个 UnstructuredMesh（等价先做 Merge Blocks 再采样）：
+ * 点 / 单元按块顺序追加并做序号偏移，属性按「名字 + 附着类型」取并集后逐块填写。
+ * 采样点同时落在多个块中时，序号靠前的块先命中（LocateSample 按单元序号取第一个命中）。
+ */
+UnstructuredMesh::Pointer MergeSourceBlocks(const std::vector<UnstructuredMesh::Pointer>& blocks) {
+    if (blocks.empty()) { return nullptr; }
+    if (blocks.size() == 1) { return blocks[0]; }
+
+    IGsize totalPoints = 0;
+    IGsize totalCells = 0;
+    std::vector<SourceAttributeLayout> layouts;
+    for (const auto& block : blocks) {
+        if (block == nullptr) { continue; }
+        totalPoints += block->GetNumberOfPoints();
+        totalCells += block->GetNumberOfCells();
+        CollectSourceAttributeLayout(block->GetAttributeSet(), layouts);
+    }
+
+    auto mesh = UnstructuredMesh::New();
+    for (const auto& block : blocks) {
+        if (block != nullptr) {
+            mesh->SetName(block->GetName());
+            break;
+        }
+    }
+
+    // 1) 合并点
+    auto points = Points::New();
+    for (const auto& block : blocks) {
+        if (block == nullptr) { continue; }
+        const IGsize pointNum = block->GetNumberOfPoints();
+        for (IGsize i = 0; i < pointNum; ++i) { points->AddPoint(block->GetPoint(i)); }
+    }
+    mesh->SetPoints(points);
+
+    // 2) 合并单元（点序号偏移）
+    auto cells = CellArray::New();
+    auto types = UnsignedIntArray::New();
+    std::vector<igIndex> ids;
+    igIndex pointOffset = 0;
+    for (const auto& block : blocks) {
+        if (block == nullptr) { continue; }
+        const IGsize cellNum = block->GetNumberOfCells();
+        for (IGsize c = 0; c < cellNum; ++c) {
+            const igIndex* cellIds = nullptr;
+            const int cnt = block->GetCellPointIds(c, cellIds);
+            ids.resize(static_cast<size_t>(std::max(0, cnt)));
+            for (int k = 0; k < cnt; ++k) { ids[static_cast<size_t>(k)] = cellIds[k] + pointOffset; }
+            cells->AddCellIds((cnt > 0) ? ids.data() : nullptr, std::max(0, cnt));
+            types->AddValue(block->GetCellType(c));
+        }
+        pointOffset += static_cast<igIndex>(block->GetNumberOfPoints());
+    }
+    mesh->SetCells(cells, types);
+
+    // 3) 合并属性：先按总长度建数组（多出的位置由 Resize 置 0），再逐块填写
+    AttributeSet::Pointer outSet = AttributeSet::New();
+    std::vector<ArrayObject::Pointer> arrays;
+    arrays.reserve(layouts.size());
+    for (const auto& layout : layouts) {
+        auto array = CreateArrayObject(layout.arrayType);
+        if (array == nullptr) {
+            arrays.push_back(nullptr);
+            continue;
+        }
+        array->SetName(layout.name);
+        array->SetDimension(layout.dimension);
+        array->Resize(layout.attachmentType == IG_POINT ? totalPoints : totalCells);
+        arrays.push_back(array);
+    }
+
+    std::vector<double> values;
+    igIndex pointBase = 0;
+    igIndex cellBase = 0;
+    for (const auto& block : blocks) {
+        if (block == nullptr) { continue; }
+        AttributeSet* set = block->GetAttributeSet();
+        const IGsize pointNum = block->GetNumberOfPoints();
+        const IGsize cellNum = block->GetNumberOfCells();
+
+        if (set != nullptr) {
+            for (size_t a = 0; a < layouts.size(); ++a) {
+                if (arrays[a] == nullptr) { continue; }
+                const SourceAttributeLayout& layout = layouts[a];
+                const bool isPoint = (layout.attachmentType == IG_POINT);
+                const IGsize count = isPoint ? pointNum : cellNum;
+                const igIndex base = isPoint ? pointBase : cellBase;
+
+                ArrayObject* src = set->GetArrayPointer(IG_NONE, layout.attachmentType, layout.name);
+                if (src == nullptr || src->GetDimension() <= 0) { continue; }
+
+                values.assign(static_cast<size_t>(layout.dimension), 0.0);
+                for (IGsize i = 0; i < count; ++i) {
+                    std::fill(values.begin(), values.end(), 0.0);
+                    src->GetElement(i, values.data());
+                    arrays[a]->SetElement(base + i, values.data());
+                }
+            }
+        }
+
+        pointBase += static_cast<igIndex>(pointNum);
+        cellBase += static_cast<igIndex>(cellNum);
+    }
+
+    for (size_t a = 0; a < layouts.size(); ++a) {
+        if (arrays[a] == nullptr) { continue; }
+        outSet->AddAttribute(layouts[a].type, layouts[a].attachmentType, arrays[a]);
+    }
+    mesh->SetAttributeSet(outSet);
+    return mesh;
+}
+
+/** 单个叶子网格 → UnstructuredMesh；不支持的类型返回 nullptr */
+UnstructuredMesh::Pointer MeshFromLeaf(DataObject* object) {
+    switch (object->GetDataObjectType()) {
+        case IG_UNSTRUCTURED_MESH:
+            return DynamicCast<UnstructuredMesh>(object);
+        case IG_LAGRANGE_UNSTRUCTURED_MESH:
+            return MeshFromLagrange(DynamicCast<LagrangeUnstructuredMesh>(object));
+        case IG_SURFACE_MESH: {
+            auto surface = DynamicCast<SurfaceMesh>(object);
+            if (surface == nullptr) { return nullptr; }
+            auto mesh = UnstructuredMesh::New();
+            return mesh->GenerateFromSurfaceMesh(surface) ? mesh : nullptr;
+        }
+        case IG_VOLUME_MESH: {
+            auto volume = DynamicCast<VolumeMesh>(object);
+            if (volume == nullptr) { return nullptr; }
+            auto mesh = UnstructuredMesh::New();
+            return mesh->GenerateFromVolumeMesh(volume) ? mesh : nullptr;
+        }
+        case IG_STRUCTURED_MESH:
+            return MeshFromStructured(DynamicCast<StructuredMesh>(object));
+        case IG_POINT_SET:
+            return MeshFromPointSet(DynamicCast<PointSet>(object));
+        default:
+            return nullptr;
+    }
+}
+
+/**
+ * 递归收集输入中的所有网格块：
+ *   - 目标是具体网格类型 → 直接转换；
+ *   - 目标是容器（DrawObject / DataObject / CompositeDataObject 等）→ 遍历子数据对象，
+ *     使多帧时间序列、多 zone 文件这类「父对象 + 多个子网格」的输入也能整体采样。
+ */
+void CollectSourceBlocks(DataObject* object, std::vector<UnstructuredMesh::Pointer>& blocks, int depth) {
+    if (object == nullptr || depth > 8) { return; }
+
+    switch (object->GetDataObjectType()) {
+        case IG_UNSTRUCTURED_MESH:
+        case IG_LAGRANGE_UNSTRUCTURED_MESH:
+        case IG_SURFACE_MESH:
+        case IG_VOLUME_MESH:
+        case IG_STRUCTURED_MESH:
+        case IG_POINT_SET: {
+            auto mesh = MeshFromLeaf(object);
+            if (mesh != nullptr) { blocks.push_back(mesh); }
+            return;
+        }
+        default:
+            break;
+    }
+
+    if (auto composite = DynamicCast<CompositeDataObject>(object)) {
+        const unsigned int childNum = composite->GetNumberOfChildren();
+        for (unsigned int i = 0; i < childNum; ++i) {
+            CollectSourceBlocks(composite->GetChild(static_cast<int>(i)), blocks, depth + 1);
+        }
+        if (childNum > 0) { return; }
+    }
+
+    if (object->GetNumberOfSubDataObjects() > 0) {
+        for (auto it = object->SubDataObjectIteratorBegin(); it != object->SubDataObjectIteratorEnd(); ++it) {
+            CollectSourceBlocks(it->second.GetPointer(), blocks, depth + 1);
+        }
+    }
+}
+
+/**
+ * 归一化入口：任意受支持网格 / 容器 → 一份 UnstructuredMesh。
+ * 单块输入不做拷贝（直接返回转换结果）；blockCount 返回合并前的块数。
+ */
+UnstructuredMesh::Pointer BuildSourceMesh(DataObject* object, int& blockCount) {
+    blockCount = 0;
+    if (object == nullptr) { return nullptr; }
+
+    std::vector<UnstructuredMesh::Pointer> blocks;
+    CollectSourceBlocks(object, blocks, 0);
+    blockCount = static_cast<int>(blocks.size());
+    if (blocks.empty()) { return nullptr; }
+    return MergeSourceBlocks(blocks);
+}
+
 } // namespace
 
 /* ------------------------------------------------------------------ */
@@ -1713,15 +2122,22 @@ bool ResampleWithDataSet::Execute() {
 
     auto probePoints = probe->GetPoints();
     if (probePoints == nullptr || probePoints->GetNumberOfPoints() == 0) {
-        m_Message = "「采样点网格」没有点，无法确定采样位置";
+        m_Message = std::string("「采样点网格」没有点，无法确定采样位置（数据类型：") +
+                    SourceTypeName(probe->GetDataObjectType()) + "）";
         return false;
     }
 
-    // 被采样网格优先使用 UnstructuredMesh；SurfaceMesh / VolumeMesh / StructuredMesh 先转换
-    auto mesh = DynamicCast<UnstructuredMesh>(source);
-    if (mesh == nullptr) { mesh = UnstructuredMesh::TransDataObjToUnstructuredMesh(source); }
+    // 被采样网格：归一化为一份 UnstructuredMesh。
+    // 对齐 ParaView 的 Resample With Dataset（任意 vtkDataSet + 复合数据集逐块展开）：
+    //   UnstructuredMesh 直接用；SurfaceMesh / VolumeMesh 转换；StructuredMesh 按 (ni,nj,nk) 生成单元；
+    //   PointSet 每点生成 IG_VERTEX；LagrangeUnstructuredMesh 保留原单元类型；
+    //   容器（DrawObject / CompositeDataObject / 带子数据对象）递归展开后合并为一份网格。
+    int sourceBlockCount = 0;
+    auto mesh = BuildSourceMesh(source.GetPointer(), sourceBlockCount);
     if (mesh == nullptr) {
-        m_Message = "「被采样网格」无法转换为 UnstructuredMesh";
+        m_Message = std::string("「被采样网格」不支持的数据类型：") + SourceTypeName(source->GetDataObjectType()) +
+                    "（支持 PointSet / SurfaceMesh / VolumeMesh / UnstructuredMesh / StructuredMesh / "
+                    "LagrangeUnstructuredMesh，以及包含它们的容器网格）";
         return false;
     }
     if (mesh->GetNumberOfPoints() == 0 || mesh->GetNumberOfCells() == 0) {
@@ -1796,14 +2212,14 @@ bool ResampleWithDataSet::Execute() {
         ++m_SnappedPointCount;
     }
 
-    // 属性：① 被采样网格的点数据插值 ② 其单元数据按命中单元拷到点 ③ validpointmask
-    // 注意：对齐 vtkProbeFilter 的默认值（PassPointArrays = 0、PassCellArrays = 0），
-    // 「采样点网格」自身的属性数组不再复制到输出里。
+    // 属性：① 被采样网格的点数据插值 ② validpointmask
+    // 注意一：被采样网格的**单元数据不进入输出**（单元只用于定位采样点命中哪个单元），
+    //         输出只含插值后的点数据与 validpointmask。
+    // 注意二：对齐 vtkProbeFilter 的默认值（PassPointArrays = 0、PassCellArrays = 0），
+    //         「采样点网格」自身的属性数组也不复制到输出里。
     AttributeSet* inAttr = mesh->GetAttributeSet();
     AttributeSet::Pointer outAttr = AttributeSet::New();
-    std::vector<std::string> producedPointNames;
-    InterpolatePointData(inAttr, outAttr, locations, sampleNum, producedPointNames);
-    CopyCellData(inAttr, outAttr, locations, sampleNum, producedPointNames);
+    InterpolatePointData(inAttr, outAttr, locations, sampleNum);
     AddValidPointMask(outAttr, sampleNum);
 
     // 输出 = 采样点网格的同类型深拷贝（几何/拓扑独立），属性换成采样结果
@@ -1820,6 +2236,9 @@ bool ResampleWithDataSet::Execute() {
                 ", invalid=" + std::to_string(sampleNum - validCount) +
                 ", tolerance=" + std::to_string(m_EffectiveTolerance) +
                 (m_AutoTolerance ? " (auto = bboxDiag*1e-6)" : " (manual)");
+    if (sourceBlockCount > 1) {
+        m_Message += ", source blocks=" + std::to_string(sourceBlockCount);
+    }
     if (m_SnappedPointCount > 0) {
         m_Message += ", snapped=" + std::to_string(m_SnappedPointCount) +
                      " (radius=" + std::to_string(m_EffectiveSnappingRadius) + ")";
@@ -2268,8 +2687,7 @@ double ResampleWithDataSet::DistanceToCellBoundary(const UnstructuredMesh::Point
 /* 属性插值                                                            */
 /* ------------------------------------------------------------------ */
 void ResampleWithDataSet::InterpolatePointData(AttributeSet* inSet, AttributeSet::Pointer outSet,
-                                          const std::vector<SampleLocation>& locations, int sampleNum,
-                                          std::vector<std::string>& producedPointNames) {
+                                          const std::vector<SampleLocation>& locations, int sampleNum) {
     if (inSet == nullptr || outSet == nullptr) { return; }
     auto all = inSet->GetAllAttributes();
     if (all == nullptr) { return; }
@@ -2313,54 +2731,6 @@ void ResampleWithDataSet::InterpolatePointData(AttributeSet* inSet, AttributeSet
             dst->SetElement(static_cast<IGsize>(j), values.data());
         }
 
-        producedPointNames.push_back(src->GetName());
-        outSet->AddAttribute(attr.type, IG_POINT, dst, attr.GetDataRange());
-    }
-}
-
-void ResampleWithDataSet::CopyCellData(AttributeSet* inSet, AttributeSet::Pointer outSet,
-                                  const std::vector<SampleLocation>& locations, int sampleNum,
-                                  const std::vector<std::string>& pointNames) {
-    if (inSet == nullptr || outSet == nullptr) { return; }
-    auto all = inSet->GetAllAttributes();
-    if (all == nullptr) { return; }
-
-    std::vector<double> values;
-    for (IGsize i = 0; i < all->GetNumberOfElements(); ++i) {
-        auto& attr = all->GetElement(i);
-        if (attr.isDeleted || attr.pointer == nullptr) { continue; }
-        if (attr.attachmentType != IG_CELL) { continue; }
-
-        auto src = attr.pointer;
-
-        // 同名数组若已由源点数据产出，则点数据优先（与 vtkProbeFilter 一致：
-        // “If an array of the same name exists both in source's point and cell data,
-        //   only the one from the point data is probed.”）
-        if (std::find(pointNames.begin(), pointNames.end(), src->GetName()) != pointNames.end()) { continue; }
-
-        const int dim = src->GetDimension();
-        if (dim <= 0) { continue; }
-
-        // Cell Data 是复制关系，完整保留原数组数据类型与分量数
-        auto dst = CreateArrayObject(src->GetArrayType());
-        if (dst == nullptr) { continue; }
-        dst->SetName(src->GetName());
-        dst->SetDimension(dim);
-        dst->Resize(static_cast<IGsize>(sampleNum));
-
-        const IGsize cellNum = src->GetNumberOfElements();
-        values.assign(static_cast<size_t>(dim), 0.0);
-        for (int j = 0; j < sampleNum; ++j) {
-            std::fill(values.begin(), values.end(), 0.0);
-            const igIndex cellId = locations[static_cast<size_t>(j)].cellId;
-            if (cellId >= 0 && static_cast<IGsize>(cellId) < cellNum) {
-                src->GetElement(static_cast<IGsize>(cellId), values.data());
-            }
-            dst->SetElement(static_cast<IGsize>(j), values.data());
-        }
-
-        // 输出不再包含采样点网格自身的数组，这里无需记录数组名
-        // 复制到采样点上，因此附着类型为 IG_POINT
         outSet->AddAttribute(attr.type, IG_POINT, dst, attr.GetDataRange());
     }
 }

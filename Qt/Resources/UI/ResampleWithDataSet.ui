@@ -26,7 +26,7 @@
          <string>被采样网格</string>
         </property>
         <property name="toolTip">
-         <string>提供数据的网格（对应 VTK 的 Source）：它的点数据会被插值，单元数据会按采样点命中的单元拷贝到采样点上。</string>
+         <string>提供数据的网格（对应 VTK 的 Source）：只有它的点数据会被插值到采样点上；它的单元数据不进入输出（单元只用于定位采样点）。</string>
         </property>
        </widget>
       </item>

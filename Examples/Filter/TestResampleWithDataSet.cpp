@@ -10,7 +10,9 @@
  *   3) validpointmask 与 GetSampleValidMask() 一致；网格外的点标记无效、插值填 0；
  *   4) 吸附半径关闭时近距网格外的点无效，开启后被吸附为有效，而远处的点仍无效；
  *   5) 「采样点网格」自身的数组**不**被复制到输出（对齐 vtkProbeFilter 默认 PassPointArrays/CellArrays=0）；
- *   6) 缺少输入时 Execute() 返回 false 并给出消息。
+ *   6) 「被采样网格」的单元数据不进入输出：输出属性只有「源点数据插值 + validpointmask」，
+ *      源单元数组 cid 既不作为点属性也不作为单元属性出现；
+ *   7) 缺少输入时 Execute() 返回 false 并给出消息。
  *
  * 「被采样网格」从 Examples/Models/RenameResample_test.vtk 读入（单位六面体，
  * 点数组 value = 0..7、alpha = 100..107，单元数组 cid = 42），不依赖渲染上下文，可直接运行。
@@ -52,23 +54,26 @@ void CheckNear(double actual, double expected, double tol, const std::string& wh
 const char* kTestMeshName = "RenameResample_test.vtk";
 
 /**
- * 定位测试网格：兼容从 <build>/Examples（ctest 的工作目录）、构建根目录、
+ * 定位 Examples/Models 下的模型：兼容从 <build>/Examples（ctest 的工作目录）、构建根目录、
  * 源码根目录等不同工作目录下运行。
  */
-std::string ResolveTestMeshPath() {
+std::string ResolveModelPath(const std::string& fileName) {
     const std::vector<std::string> candidates = {
-            std::string("Models/") + kTestMeshName,
-            std::string("./Models/") + kTestMeshName,
-            std::string("../Models/") + kTestMeshName,
-            std::string("../../Models/") + kTestMeshName,
-            std::string("Examples/Models/") + kTestMeshName,
-            std::string("../../../Examples/Models/") + kTestMeshName,
+            std::string("Models/") + fileName,
+            std::string("./Models/") + fileName,
+            std::string("../Models/") + fileName,
+            std::string("../../Models/") + fileName,
+            std::string("Examples/Models/") + fileName,
+            std::string("../../../Examples/Models/") + fileName,
     };
     for (const std::string& candidate : candidates) {
         if (std::filesystem::exists(candidate)) { return candidate; }
     }
     return std::string();
 }
+
+/** 定位测试网格（单位六面体） */
+std::string ResolveTestMeshPath() { return ResolveModelPath(kTestMeshName); }
 
 /**
  * 读入「被采样网格」：单位六面体，点数组 value(0..7)、alpha(100..107)，单元数组 cid=42。
@@ -185,6 +190,17 @@ void TestSelfProbeOnMesh() {
     }
     Check(validCount >= 1, "至少有 1 个采样点有效（validCount=" + std::to_string(validCount) + "）");
     Check(mismatch == 0, "所有有效点的插值结果等于原值");
+
+    // 输出属性只来自「被采样网格的点数据插值 + validpointmask」：不继承采样点网格（这里是同一个网格，
+    // 带 CELL_DATA cid）的单元附着属性。输出是网格时该断言才有意义，故放在本用例而不是点云用例。
+    int cellAttachmentCount = 0;
+    auto outAll = output->GetAttributeSet() ? output->GetAttributeSet()->GetAllAttributes() : nullptr;
+    for (IGsize i = 0; outAll != nullptr && i < outAll->GetNumberOfElements(); ++i) {
+        auto& attr = outAll->GetElement(i);
+        if (attr.isDeleted || attr.pointer == nullptr) { continue; }
+        if (attr.attachmentType == IG_CELL) { ++cellAttachmentCount; }
+    }
+    Check(cellAttachmentCount == 0, "输出不含任何单元附着属性（只有插值点数据 + validpointmask）");
 }
 
 /* ------------------------------------------------------------------ */
@@ -255,7 +271,7 @@ void TestPointCloudProbe() {
     //   原现象：本滤波器把「采样点网格」自身的数组一并复制到输出（等价 PassPointArrays/PassCellArrays = ON），
     //           无效点上仍是原值，看起来像"未命中却没置 0"。
     //   正确行为：对齐 vtkProbeFilter 默认值（PassPointArrays = 0、PassCellArrays = 0），输出只含
-    //           被采样网格的插值点数据 + 按命中单元复制的单元数据 + validpointmask。
+    //           被采样网格的插值点数据 + validpointmask。
     //   本次提交主题："fix: ResampleWithDataSet 不再复制采样点网格自身属性（对齐 vtkProbeFilter 默认 PassPointArrays/CellArrays=0）"
     //   查询该测试引入提交的命令：
     //     git log --diff-filter=A --format="%h %s" -- Examples/Filter/TestResampleWithDataSet.cpp
@@ -263,6 +279,21 @@ void TestPointCloudProbe() {
     auto outMarker = FindPointArray(output->GetAttributeSet(), "probe_marker", &markerHits);
     Check(outMarker == nullptr && markerHits == 0, "采样点网格自身的数组 probe_marker 不再出现在输出中");
     if (outMarker != nullptr) { CheckNear(outMarker->GetElementValue(0, 0), 100.0, 1e-6, "probe_marker 数值保持"); }
+
+    // 变更说明（被采样网格的单元数据不进入输出；提交状态：待提交）：
+    //   原现象：本滤波器把「被采样网格」的单元数据按命中单元拷到输出的点上（等价 vtkProbeFilter 的
+    //           InputCellArrays 行为），输出点属性里会多出一个源单元数组 cid（值 42）。
+    //   触发条件：被采样网格带 CELL_DATA（本用例的测试网格有 CELL_DATA cid = 42）时执行 Execute()。
+    //   正确行为：被采样网格的单元数组既不作为点属性、也不作为单元属性进入输出；输出属性只有
+    //           「源点数据插值 + validpointmask」。
+    int cidHits = 0;
+    auto outAll = output->GetAttributeSet() ? output->GetAttributeSet()->GetAllAttributes() : nullptr;
+    for (IGsize i = 0; outAll != nullptr && i < outAll->GetNumberOfElements(); ++i) {
+        auto& attr = outAll->GetElement(i);
+        if (attr.isDeleted || attr.pointer == nullptr) { continue; }
+        if (attr.pointer->GetName() == "cid") { ++cidHits; }
+    }
+    Check(cidHits == 0, "被采样网格的单元数组 cid 不再出现在输出中（点 / 单元附着都没有）");
 
     std::cout << "        有效点数 = " << static_cast<int>(filter->GetSampleValidMask().size()) << " 中 "
               << "有效=" << (int)mask[0] << (int)mask[1] << (int)mask[2] << (int)mask[3] << (int)mask[4] << std::endl;
