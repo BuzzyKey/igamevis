@@ -6,7 +6,7 @@
 
 Filter 提供两种映射方式：
 
-- **自动平面生成**：拟合输入点集的最小二乘平面，在平面内建立坐标轴，并将 S、T 分别归一化到 `[0, 1]`。
+- **自动平面生成**：按 ParaView 的处理方式先根据包围盒选择候选平面；当点集在三个方向上都有明显跨度时，再尝试最小二乘平面拟合。最后在平面内建立坐标轴，将 S、T 分别映射到 `[0, 1]`。
 - **手动平面参数**：由 `Origin`、`Point1` 和 `Point2` 定义两条映射轴，参数含义与 ParaView 一致。两条轴可以不正交，但长度必须大于零且不能共线。
 
 手动模式按下式计算点 `P` 的纹理坐标：
@@ -72,7 +72,7 @@ if (!filter->Execute()) {
 | `TextureMapToPlaneManualPatch.vtk` | 非正交手动轴 | 逐点结果与 ParaView 一致 |
 | `TextureMapToPlaneCurvedSaddle.vtk` | 曲面投影 | 手动 XY 映射满足 `S=X/4`、`T=Y/4`；自动模式输出有限的 `[0, 1]` 坐标 |
 
-录屏使用 `TextureMapToPlaneCurvedSaddle.vtk`。手动模式参数如下：
+仓库内的示例可用于快速验证基本功能。录制与 ParaView 的对比视频时，应另选面数较多、具有复杂外形或非平面区域的模型，并在两个程序中使用相同的自动/手动参数。手动模式可使用以下参数进行对照：
 
 ```text
 Origin = (0, 0, 0)
@@ -92,7 +92,7 @@ Examples/Filter/DataProcessing/TextureMapToPlane/TestTextureMapToPlane.cpp
 testTextureMapToPlane.exe
 ```
 
-测试内容包括自动映射、手动映射、曲面投影、独立输出、输入保持不变、支持的数据类型和无效参数处理。测试程序不使用 `Tet_Plane.vtk`。
+测试内容包括与 ParaView 一致的三维自动映射、手动映射、曲面投影、独立输出、输入保持不变、支持的数据类型和无效参数处理。测试程序不使用 `Tet_Plane.vtk`。
 
 ## 5. 支持范围
 

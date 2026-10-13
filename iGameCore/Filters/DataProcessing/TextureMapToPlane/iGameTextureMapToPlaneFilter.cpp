@@ -7,8 +7,6 @@
 #include <iGameUnstructuredMesh.h>
 #include <iGameVolumeMesh.h>
 
-#include <Eigen/Eigenvalues>
-
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -91,11 +89,30 @@ DataObject::Pointer ClonePointSet(const DataObject::Pointer& input) {
     }
 }
 
-bool FirstSignificantComponentIsNegative(const Eigen::Vector3d& vector, double tolerance) {
-    for (int axis = 0; axis < 3; ++axis) {
-        if (std::abs(vector[axis]) > tolerance) return vector[axis] < 0.0;
-    }
-    return false;
+double Dot(const std::array<double, 3>& left, const std::array<double, 3>& right) {
+    return left[0] * right[0] + left[1] * right[1] + left[2] * right[2];
+}
+
+std::array<double, 3> Cross(const std::array<double, 3>& left,
+                            const std::array<double, 3>& right) {
+    return {left[1] * right[2] - left[2] * right[1],
+            left[2] * right[0] - left[0] * right[2],
+            left[0] * right[1] - left[1] * right[0]};
+}
+
+bool Normalize(std::array<double, 3>& vector) {
+    const double length = std::sqrt(Dot(vector, vector));
+    if (length == 0.0) return false;
+    for (double& component : vector) component /= length;
+    return true;
+}
+
+double Determinant(const std::array<double, 3>& row0,
+                   const std::array<double, 3>& row1,
+                   const std::array<double, 3>& row2) {
+    return row0[0] * (row1[1] * row2[2] - row1[2] * row2[1])
+           - row0[1] * (row1[0] * row2[2] - row1[2] * row2[0])
+           + row0[2] * (row1[0] * row2[1] - row1[1] * row2[0]);
 }
 
 } // namespace
@@ -126,88 +143,116 @@ bool TextureMapToPlaneFilter::Execute() {
     constexpr double relativeTolerance = 1.0e-12;
 
     if (m_AutomaticPlaneGeneration) {
-        if (pointCount < 3) return fail("自动平面拟合至少需要三个非共线点。");
+        if (pointCount < 3) return fail("自动平面生成至少需要三个点。");
 
-        Eigen::Vector3d center = Eigen::Vector3d::Zero();
-        double coordinateScale = 0.0;
+        std::array<double, 6> bounds{
+                std::numeric_limits<double>::max(), std::numeric_limits<double>::lowest(),
+                std::numeric_limits<double>::max(), std::numeric_limits<double>::lowest(),
+                std::numeric_limits<double>::max(), std::numeric_limits<double>::lowest()};
         for (IGsize pointId = 0; pointId < pointCount; ++pointId) {
             const auto& point = inputPointSet->GetPoint(pointId);
-            center += Eigen::Vector3d(point[0], point[1], point[2]);
-            coordinateScale = std::max({coordinateScale, std::abs(static_cast<double>(point[0])),
-                                        std::abs(static_cast<double>(point[1])),
-                                        std::abs(static_cast<double>(point[2]))});
-        }
-        center /= static_cast<double>(pointCount);
-
-        Eigen::Matrix3d covariance = Eigen::Matrix3d::Zero();
-        for (IGsize pointId = 0; pointId < pointCount; ++pointId) {
-            const auto& point = inputPointSet->GetPoint(pointId);
-            const Eigen::Vector3d offset(point[0] - center[0], point[1] - center[1], point[2] - center[2]);
-            covariance.noalias() += offset * offset.transpose();
-        }
-        Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> solver(covariance);
-        if (solver.info() != Eigen::Success) return fail("自动平面拟合失败：无法求解输入点集的主方向。");
-
-        const auto eigenvalues = solver.eigenvalues();
-        const double scaleSquared = std::max(1.0, coordinateScale * coordinateScale);
-        if (eigenvalues[1] <= scaleSquared * relativeTolerance) {
-            return fail("自动平面拟合失败：输入点全部重合或近似共线，无法确定二维纹理平面。");
+            for (int axis = 0; axis < 3; ++axis) {
+                bounds[2 * axis] = std::min(bounds[2 * axis], static_cast<double>(point[axis]));
+                bounds[2 * axis + 1] = std::max(bounds[2 * axis + 1], static_cast<double>(point[axis]));
+            }
         }
 
-        Eigen::Vector3d normal = solver.eigenvectors().col(0).normalized();
-        const double minimumNormalComponent = std::min({std::abs(normal[0]), std::abs(normal[1]),
-                                                        std::abs(normal[2])});
+        std::array<double, 3> extents{};
+        double dataLengthSquared = 0.0;
+        int minimumWidthAxis = 0;
+        double minimumWidth = std::numeric_limits<double>::max();
+        for (int axis = 0; axis < 3; ++axis) {
+            extents[axis] = bounds[2 * axis + 1] - bounds[2 * axis];
+            dataLengthSquared += extents[axis] * extents[axis];
+            if (extents[axis] < minimumWidth) {
+                minimumWidth = extents[axis];
+                minimumWidthAxis = axis;
+            }
+        }
+        const double dataLength = std::sqrt(dataLengthSquared);
+        if (dataLength == 0.0) return fail("自动平面生成失败：输入点全部重合。");
+
+        std::array<double, 3> normal{};
+        normal[minimumWidthAxis] = 1.0;
+        if (minimumWidth > dataLength * 1.0e-3) {
+            std::array<std::array<double, 3>, 3> matrix{};
+            std::array<double, 3> right{};
+            for (IGsize pointId = 0; pointId < pointCount; ++pointId) {
+                const auto& point = inputPointSet->GetPoint(pointId);
+                const double x = point[0];
+                const double y = point[1];
+                const double z = point[2];
+                right[0] += x * z;
+                right[1] += y * z;
+                right[2] += z;
+                matrix[0][0] += x * x;
+                matrix[0][1] += x * y;
+                matrix[0][2] += x;
+                matrix[1][0] += x * y;
+                matrix[1][1] += y * y;
+                matrix[1][2] += y;
+                matrix[2][0] += x;
+                matrix[2][1] += y;
+            }
+            matrix[2][2] = static_cast<double>(pointCount);
+            const double determinant = Determinant(matrix[0], matrix[1], matrix[2]);
+            if (determinant > 1.0e-3) {
+                normal[0] = Determinant(right, matrix[1], matrix[2]) / determinant;
+                normal[1] = Determinant(matrix[0], right, matrix[2]) / determinant;
+                normal[2] = -1.0;
+            }
+        }
+        if (!Normalize(normal)) return fail("自动平面生成失败：无法确定平面法向量。");
+
         int referenceAxis = 0;
-        while (referenceAxis < 2 &&
-               std::abs(normal[referenceAxis]) > minimumNormalComponent + 1.0e-10) ++referenceAxis;
-        Eigen::Vector3d reference = Eigen::Vector3d::Zero();
+        double minimumProjection = 1.0;
+        for (int axis = 0; axis < 3; ++axis) {
+            const double projection = std::abs(normal[axis]);
+            if (projection < minimumProjection) {
+                minimumProjection = projection;
+                referenceAxis = axis;
+            }
+        }
+        std::array<double, 3> reference{};
         reference[referenceAxis] = 1.0;
-        Eigen::Vector3d sAxis = (reference - normal * normal.dot(reference)).normalized();
-        Eigen::Vector3d tAxis = normal.cross(sAxis).normalized();
-        const double axisTolerance = std::numeric_limits<double>::epsilon() * 64.0;
-        if (FirstSignificantComponentIsNegative(tAxis, axisTolerance)) tAxis = -tAxis;
+        auto tAxis = Cross(normal, reference);
+        if (!Normalize(tAxis)) return fail("自动平面生成失败：无法确定 T 轴。");
+        const auto sAxis = Cross(tAxis, normal);
+        const double sExtent = Dot(sAxis, extents);
+        const double tExtent = Dot(tAxis, extents);
+        const double extentTolerance = dataLength * relativeTolerance;
+        if (std::abs(sExtent) <= extentTolerance || std::abs(tExtent) <= extentTolerance) {
+            return fail("自动平面生成失败：输入点在映射平面上的二维范围退化。");
+        }
 
-        double sMin = std::numeric_limits<double>::max();
-        double sMax = std::numeric_limits<double>::lowest();
-        double tMin = std::numeric_limits<double>::max();
-        double tMax = std::numeric_limits<double>::lowest();
         for (IGsize pointId = 0; pointId < pointCount; ++pointId) {
             const auto& point = inputPointSet->GetPoint(pointId);
-            const Eigen::Vector3d offset(point[0] - center[0], point[1] - center[1], point[2] - center[2]);
-            coordinates[pointId] = {offset.dot(sAxis), offset.dot(tAxis)};
-            sMin = std::min(sMin, coordinates[pointId][0]);
-            sMax = std::max(sMax, coordinates[pointId][0]);
-            tMin = std::min(tMin, coordinates[pointId][1]);
-            tMax = std::max(tMax, coordinates[pointId][1]);
-        }
-        const double sLength = sMax - sMin;
-        const double tLength = tMax - tMin;
-        const double extentTolerance = std::max(1.0, coordinateScale) * 1.0e-10;
-        if (sLength <= extentTolerance || tLength <= extentTolerance) {
-            return fail("自动平面拟合失败：输入点在拟合平面上的二维范围退化。");
-        }
-        for (auto& coordinate : coordinates) {
-            coordinate[0] = (coordinate[0] - sMin) / sLength;
-            coordinate[1] = (coordinate[1] - tMin) / tLength;
+            const std::array<double, 3> offset{
+                    point[0] - bounds[0], point[1] - bounds[2], point[2] - bounds[4]};
+            coordinates[pointId] = {Dot(sAxis, offset) / sExtent,
+                                    Dot(tAxis, offset) / tExtent};
         }
     } else {
-        const Eigen::Vector3d origin(m_Origin[0], m_Origin[1], m_Origin[2]);
-        const Eigen::Vector3d sAxis(m_Point1[0] - m_Origin[0], m_Point1[1] - m_Origin[1],
-                                    m_Point1[2] - m_Origin[2]);
-        const Eigen::Vector3d tAxis(m_Point2[0] - m_Origin[0], m_Point2[1] - m_Origin[1],
-                                    m_Point2[2] - m_Origin[2]);
-        const double sLengthSquared = sAxis.squaredNorm();
-        const double tLengthSquared = tAxis.squaredNorm();
+        const std::array<double, 3> origin{m_Origin[0], m_Origin[1], m_Origin[2]};
+        const std::array<double, 3> sAxis{m_Point1[0] - m_Origin[0], m_Point1[1] - m_Origin[1],
+                                          m_Point1[2] - m_Origin[2]};
+        const std::array<double, 3> tAxis{m_Point2[0] - m_Origin[0], m_Point2[1] - m_Origin[1],
+                                          m_Point2[2] - m_Origin[2]};
+        const double sLengthSquared = Dot(sAxis, sAxis);
+        const double tLengthSquared = Dot(tAxis, tAxis);
         if (sLengthSquared <= relativeTolerance || tLengthSquared <= relativeTolerance) {
             return fail("手动映射失败：Origin 到 Point1、Point2 的两条平面轴长度都必须大于零。");
         }
-        if (sAxis.cross(tAxis).squaredNorm() <= relativeTolerance * sLengthSquared * tLengthSquared) {
+        if (Dot(Cross(sAxis, tAxis), Cross(sAxis, tAxis)) <=
+            relativeTolerance * sLengthSquared * tLengthSquared) {
             return fail("手动映射失败：Origin、Point1、Point2 不能共线。");
         }
         for (IGsize pointId = 0; pointId < pointCount; ++pointId) {
             const auto& point = inputPointSet->GetPoint(pointId);
-            const Eigen::Vector3d offset(point[0] - origin[0], point[1] - origin[1], point[2] - origin[2]);
-            coordinates[pointId] = {offset.dot(sAxis) / sLengthSquared, offset.dot(tAxis) / tLengthSquared};
+            const std::array<double, 3> offset{
+                    point[0] - origin[0], point[1] - origin[1], point[2] - origin[2]};
+            coordinates[pointId] = {Dot(offset, sAxis) / sLengthSquared,
+                                    Dot(offset, tAxis) / tLengthSquared};
         }
     }
 

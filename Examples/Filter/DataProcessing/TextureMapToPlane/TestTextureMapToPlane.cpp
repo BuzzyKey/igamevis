@@ -169,6 +169,29 @@ bool RunCurvedSaddleCase() {
     return true;
 }
 
+bool RunAutomaticThreeDimensionalCase() {
+    auto input = iGame::PointSet::New();
+    for (const auto& point : std::array<iGame::Point, 6>{
+                 iGame::Point(0.0f, 0.0f, 0.0f), iGame::Point(2.0f, 0.0f, 1.0f),
+                 iGame::Point(0.0f, 3.0f, 2.0f), iGame::Point(2.0f, 3.0f, 5.0f),
+                 iGame::Point(1.0f, 1.0f, 4.0f), iGame::Point(0.5f, 2.5f, 1.5f)}) {
+        input->AddPoint(point);
+    }
+
+    auto filter = iGame::TextureMapToPlaneFilter::New();
+    filter->SetInput(input);
+    if (!filter->Execute()) {
+        std::cerr << "[FAIL] automatic three-dimensional mapping: " << filter->GetLastError() << '\n';
+        return false;
+    }
+    const std::vector<std::array<double, 2>> expected{
+            {0.0, 0.0}, {-0.108147650957, 0.410003840923},
+            {0.934773445129, 0.294998079538}, {1.0, 1.0},
+            {0.503130793571, 0.721248567104}, {0.715821325779, 0.286874771118}};
+    return CheckCoordinates(filter->GetTextureCoordinates(), expected,
+                            "automatic three-dimensional mapping matches ParaView");
+}
+
 iGame::Points::Pointer MakePlanarPoints() {
     auto points = iGame::Points::New();
     points->AddPoint(iGame::Point(0.0f, 0.0f, 0.0f));
@@ -255,6 +278,7 @@ bool RunInvalidInputCases() {
 
 int main() {
     const bool passed = RunAutomaticModelCase() && RunManualModelCase() && RunCurvedSaddleCase() &&
-                        RunSupportedTypeCases() && RunInvalidInputCases();
+                        RunAutomaticThreeDimensionalCase() && RunSupportedTypeCases() &&
+                        RunInvalidInputCases();
     return passed ? EXIT_SUCCESS : EXIT_FAILURE;
 }
