@@ -216,10 +216,55 @@ bool ResolveGeometry(const DataObject::Pointer& input, GeometryView& geometry) {
         case IG_STRUCTURED_MESH: {
             auto mesh = DynamicCast<StructuredMesh>(input);
             if (!mesh) return false;
-            mesh->GenStructuredCellConnectivities();
-            geometry.cells = mesh->GetCells();
-            geometry.fixedDimension = static_cast<int>(mesh->GetDimension());
-            geometry.usesStructuredCellOrdering = true;
+            const igIndex* dims = mesh->GetDimensionSize();
+            if (dims[0] < 1 || dims[1] < 1 || dims[2] < 1) return false;
+            const IGsize expectedPoints = static_cast<IGsize>(dims[0]) *
+                                          static_cast<IGsize>(dims[1]) *
+                                          static_cast<IGsize>(dims[2]);
+            if (!geometry.points ||
+                geometry.points->GetNumberOfPoints() != expectedPoints) return false;
+
+            const igIndex strides[3] = {1, dims[0], dims[0] * dims[1]};
+            int activeAxes[3] = {0, 0, 0};
+            int dimension = 0;
+            for (int axis = 0; axis < 3; ++axis) {
+                if (dims[axis] > 1) activeAxes[dimension++] = axis;
+            }
+            geometry.fixedDimension = dimension;
+            if (dimension == 3) {
+                mesh->GenStructuredCellConnectivities();
+                geometry.cells = mesh->GetVolumes();
+                geometry.usesStructuredCellOrdering = true;
+            } else if (dimension == 2 && dims[2] == 1) {
+                // 常见 XY 面网格直接复用模型已有的面单元，避免大网格再复制一份。
+                mesh->GenStructuredCellConnectivities();
+                geometry.cells = mesh->GetFaces();
+            } else if (dimension == 1 || dimension == 2) {
+                // StructuredMesh 的 GetCells() 只返回体单元；其现有面生成逻辑
+                // 也只覆盖 XY 平面。在这里按活动轴生成 XZ/YZ 面或一维线段。
+                auto cells = CellArray::New();
+                const int axis0 = activeAxes[0];
+                const igIndex step0 = strides[axis0];
+                if (dimension == 1) {
+                    for (igIndex i = 0; i + 1 < dims[axis0]; ++i) {
+                        const igIndex line[2] = {i * step0, (i + 1) * step0};
+                        cells->AddCellIds(line, 2);
+                    }
+                } else {
+                    const int axis1 = activeAxes[1];
+                    const igIndex step1 = strides[axis1];
+                    for (igIndex j = 0; j + 1 < dims[axis1]; ++j) {
+                        for (igIndex i = 0; i + 1 < dims[axis0]; ++i) {
+                            const igIndex base = i * step0 + j * step1;
+                            const igIndex quad[4] = {base, base + step0,
+                                                     base + step0 + step1,
+                                                     base + step1};
+                            cells->AddCellIds(quad, 4);
+                        }
+                    }
+                }
+                geometry.cells = cells;
+            }
             break;
         }
         default:
