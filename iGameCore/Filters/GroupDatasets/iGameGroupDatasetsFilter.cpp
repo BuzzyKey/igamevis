@@ -157,8 +157,13 @@ bool CopyCommonFields(const DataObject::Pointer& src, const DataObject::Pointer&
     // 且指向的是拷贝出的数组（改克隆不影响源）。
     if (mappingCopy) { dst->SetBlockMapping(mappingCopy); }
 
-    // 当前活动标量（伪彩）下标：表已按 1:1 下标拷贝，直接复制即可。
-    dst->SetAttributeIndex(src->GetAttributeIndex());
+    // 着色状态（活动标量下标/维度/着色开关）【不复制】——
+    // m_AttributeIndex 的语义是"已执行过 ViewCloudPicture 的记录"，不是普通输入字段：
+    // 直拷会伪造该记录，并绕过 ViewCloudPicture 内的 dataRange 共享、壳传播与
+    // m_ColorWithCell 推导，产生不自洽状态（用户点击时还可能命中其早退检查而整个返回，
+    // 该早退是"子块点属性不渲染"阻塞 bug 的 root cause，见代码审查记录）。
+    // 克隆以未着色状态出生（-1/false，与"新加载的模型未点属性前"一致），
+    // 由用户操作经 ViewCloudPicture 全链路建立着色。
     // 时间序列（动画帧）：深拷贝帧清单（时间值/元数据/类型各持一份，互不影响）；
     // 运行期缓存不复制（按需重建）——与 Qt 动画模块 independentFrames 的既定做法一致。
     if (auto srcFrames = src->PeekTimeFrames()) {
@@ -210,9 +215,16 @@ DataObject::Pointer CreateDeepClone(const DataObject::Pointer& src,
         for (auto it = src->SubDataObjectIteratorBegin(); it != src->SubDataObjectIteratorEnd(); ++it) {
             if (auto childClone = CreateDeepClone(it->second, depth + 1, skippedNames)) {
                 container->AddSubDataObject(childClone);
-                // 挂载会把容器的配色器写给子克隆 —— 立刻换回"子对象自己源配色器的独立拷贝"
+                // 挂载会把容器的配色器写给子克隆 —— 立刻换回"子对象自己源配色器的独立拷贝"。
+                // 必须连壳/简化网格一起换（SetColorMapperForRenderables）：壳在建壳瞬间
+                // 绑定的是当时本体的配色器（=容器的默认 mapper），而 SetColorMapper 是浅
+                // setter 不会覆盖它 —— 否则子块伪彩会一直用容器的默认色带/范围。
                 if (auto mapper = MakeIndependentMapper(it->second)) {
-                    childClone->SetColorMapper(mapper);
+                    if (auto childDraw = DynamicCast<DrawObject>(childClone)) {
+                        childDraw->SetColorMapperForRenderables(mapper);
+                    } else {
+                        childClone->SetColorMapper(mapper);
+                    }
                 }
                 anyChildCloned = true;
             }
@@ -386,9 +398,16 @@ bool GroupDatasetsFilter::Execute() {
         // 克隆在"装配完成"状态下再挂组：AddSubDataObject 会 SetParent + 触发转可绘制数据，
         // 并把【组的配色器】写给克隆。随后立刻换回克隆自己的一份（源配色器的独立拷贝）——
         // 伪彩与源、与组都不共享；框架原有伪彩逻辑不动。
+        // 必须用 SetColorMapperForRenderables：AddSubDataObject 先写 mapper、后建壳
+        // （见 iGameDataObject.cpp），壳会绑定到"组的默认 mapper"，仅换本体的浅 setter
+        // 不会覆盖壳 —— 这是"子块伪彩颜色与源不一致/发白"的根因。
         group->AddSubDataObject(clone);
         if (auto mapper = MakeIndependentMapper(obj)) {
-            clone->SetColorMapper(mapper);
+            if (auto cloneDraw = DynamicCast<DrawObject>(clone)) {
+                cloneDraw->SetColorMapperForRenderables(mapper);
+            } else {
+                clone->SetColorMapper(mapper);
+            }
         }
 
         m_BlockNames.push_back(clone->GetName());

@@ -360,6 +360,25 @@ iGame::DataObject::Pointer igQtModelTreeWidget::getSingleSelectedDataObject() co
             }
         } else if (auto* subItem = dynamic_cast<SubObjectTreeWidgetItem*>(current)) {
             if (subItem->getDataObject()) { return subItem->getDataObject(); }
+        } else if (dynamic_cast<SubAttribTreeWidgetItem*>(current) ||
+                   dynamic_cast<AttribTreeWidgetItem*>(current)) {
+            // 属性行作为 current 时，上下文 = 该属性行所属的数据对象：
+            //   子块属性行 → 所属子块；顶层模型属性行 → 模型根对象。
+            // 不能靠 selectedItems() 回落：点击属性行会 setCurrentItem(属性行)，
+            // 单选模式下数据对象行的选中被清掉，回落会错误地拿到模型根 ——
+            // 信息框 / 属性面板 / 色条因此显示根模型而非子块。
+            for (QTreeWidgetItem* p = current->parent(); p; p = p->parent()) {
+                if (auto* subItem = dynamic_cast<SubObjectTreeWidgetItem*>(p)) {
+                    if (subItem->getDataObject()) { return subItem->getDataObject(); }
+                    break;
+                }
+                if (auto* modelItem = dynamic_cast<ModelTreeWidgetItem*>(p)) {
+                    if (modelItem->getModel() && modelItem->getModel()->GetDataObject()) {
+                        return modelItem->getModel()->GetDataObject();
+                    }
+                    break;
+                }
+            }
         }
     }
     // currentItem 不是数据对象行（如属性行）时，回落为任意一个选中的数据对象。
@@ -575,12 +594,32 @@ void igQtModelTreeWidget::mousePressEvent(QMouseEvent* event) {
                 // Show current
                 sa->show();
                 parent->setCurrentChild(sa);
+
+                // 点击子块属性行：与子块行 / 顶层属性行分支同规则 —— 先更新选中状态
+                // （本行成为 current），再发信号。该分支此前不更新选中态、且 call=false
+                // 跳过了基类处理，导致属性行背景永不点亮（高亮停留在子模型行）。
+                sa->setSelected(true);
+                setCurrentItem(sa);
+                // 上下文切到该子块所属的顶层模型（嵌套多块时逐级向上找模型行）。
+                ModelTreeWidgetItem* rootModelItem = nullptr;
+                for (QTreeWidgetItem* p = parent->parent(); p; p = p->parent()) {
+                    if (auto* modelItem = dynamic_cast<ModelTreeWidgetItem*>(p)) {
+                        rootModelItem = modelItem;
+                        break;
+                    }
+                }
+                if (rootModelItem) {
+                    iGame::SceneManager::Instance()->GetCurrentScene()->SetCurrentModel(rootModelItem->getModel());
+                    emit ChangeCurrentModel(rootModelItem->getModel());
+                }
+
                 int dim = sa->currentIndex();
                 if (dim == -1) dim = 0;
                 // For single-component fields: use component 0
                 // For multi-component fields: index 0=Magnitude(-1), 1=x(0), 2=y(1), etc.
                 int actualDim = (sa->getDimension() == 1) ? 0 : (dim - 1);
                 sa->viewAttribute(actualDim);
+                Q_EMIT ViewCloudPicture(); // 刷新标量图例（与顶层属性行分支一致）
                 call = false;
             }
         } else {

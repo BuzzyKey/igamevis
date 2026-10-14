@@ -30,6 +30,7 @@
 #include <iGameDrawObject.h>
 #include <iGameFileIO.h>
 #include <iGamePointSet.h>
+#include <iGameScene.h>
 #include <iGameSurfaceMesh.h>
 #include <iGameUnstructuredMesh.h>
 
@@ -363,6 +364,52 @@ int main() {
             cloneMapper->SetRange(srcRangeMin + 111.0, srcRangeMin + 222.0);
             Check(srcMapper->GetRange()[0] == srcRangeMin, "改克隆配色器的范围后，源的范围不变");
             Check(cloneMapper->GetRange()[0] == srcRangeMin + 111.0, "克隆自身的配色器范围改动生效");
+        }
+    }
+
+    // =========================================================================
+    std::cout << "\n[Test 3b] 克隆的着色语义：出生未着色，经 ViewCloudPicture 全链路建立\n";
+    // =========================================================================
+    {
+        // 设计依据（代码审查确认）：m_AttributeIndex 是"已执行过 ViewCloudPicture
+        // 的记录"，不是可直拷的普通字段 —— 直拷会伪造记录、绕过 ViewCloudPicture 内的
+        // dataRange 共享 / 壳传播 / m_ColorWithCell 推导，还可能命中其早退检查而整个
+        // 返回（"子块点属性不渲染"的 root cause）。克隆必须与"新加载的模型未点属性前"
+        // 一致：以未着色状态出生，由用户操作经 ViewCloudPicture 全链路正常着色。
+        auto scene = iGame::Scene::New(); // Update() 无 UpdateFunctor，安全 no-op
+        auto colorSrc = iGame::FileIO::ReadFile(FindModelPath("group_tet.vtk"));
+        Check(colorSrc != nullptr, "着色语义：载入用例模型");
+
+        auto colorSrcDraw = iGame::DynamicCast<iGame::DrawObject>(colorSrc);
+        if (!colorSrcDraw) {
+            Check(false, "着色语义：源是可绘制对象");
+        } else {
+            colorSrcDraw->ViewCloudPicture(scene, 0, 0); // 模拟用户点属性行（走全链路）
+            Check(colorSrc->GetAttributeIndex() == 0 && colorSrcDraw->IsUseColor(),
+                  "着色语义：源经 ViewCloudPicture 着色成功");
+        }
+
+        auto filter = iGame::GroupDatasetsFilter::New();
+        filter->SetInputs({colorSrc});
+        filter->SetOutputName("ColorSemantics");
+        Check(filter->Execute(), "着色语义：组合执行成功", filter->GetMessage());
+        auto blocks = CollectBlocks(filter->GetOutput(0));
+        if (!blocks.empty()) {
+            auto clone = blocks[0];
+            auto cloneDraw = iGame::DynamicCast<iGame::DrawObject>(clone);
+            if (!cloneDraw) {
+                Check(false, "着色语义：克隆是可绘制对象");
+            } else {
+                Check(clone->GetAttributeIndex() == -1 && !cloneDraw->IsUseColor(),
+                      "克隆以未着色状态出生（不直拷源的着色记录，与'新加载未点属性前'一致）");
+                // 克隆经 ViewCloudPicture 着色：等价于"点击子块属性行"在 Core 层的操作链路
+                cloneDraw->ViewCloudPicture(scene, 0, 0);
+                Check(clone->GetAttributeIndex() == 0, "克隆经 ViewCloudPicture 着色：活动标量下标就位");
+                Check(cloneDraw->IsUseColor(), "克隆经 ViewCloudPicture 着色：着色开关就位");
+                Check(clone->GetCurrentAttributeDimension() == 0, "克隆经 ViewCloudPicture 着色：维度就位");
+            }
+        } else {
+            Check(false, "着色语义：应产出 1 个块");
         }
     }
 

@@ -4191,20 +4191,14 @@ void igQtMainWindow::initAllFilters() {
                 QString blockList;
                 const auto& blockNames = filter->GetBlockNames();
                 for (size_t i = 0; i < blockNames.size(); ++i) {
-                    blockList += QStringLiteral("\n    [%1] %2")
+                    blockList += QStringLiteral("%1. %2\n")
                                          .arg(static_cast<int>(i) + 1)
                                          .arg(QString::fromStdString(blockNames[i]));
                 }
-                const QString report =
-                        QStringLiteral("合并完成。\n\n"
-                                       "• 已合并对象数：%1 个\n"
-                                       "• 输出节点：%2\n"
-                                       "• 子块清单：%3\n\n"
-                                       "组的子块是原模型的独立拷贝（数据与显隐互不牵连）：\n"
-                                       "修改组内的块或隐藏原模型，都不会影响对方。")
-                                .arg(filter->GetGroupedCount())
-                                .arg(QString::fromStdString(groupName))
-                                .arg(blockList);
+                const QString report = QStringLiteral("已合并 %1 个对象 → %2\n%3")
+                                               .arg(filter->GetGroupedCount())
+                                               .arg(QString::fromStdString(groupName))
+                                               .arg(blockList);
                 showDarkFramelessMessage(QStringLiteral("合并数据集"), report, true);
             });
 
@@ -5479,8 +5473,20 @@ void igQtMainWindow::initAllMySignalConnections() {
 
 
     /* Model Tree signal connect BEGIN.*/
-    connect(this->modelTreeWidget, &igQtModelDialogWidget::CloudPictureChanged, ui->widget_ScalarField,
-            &igQtScalarViewWidget::showScalarView);
+    // 色条按"选中优先"的数据对象工作：把模型树当前选中对象（多块组内为子块）推给
+    // 色条控件后再刷新 —— 此前固定读当前模型根对象，组根未着色（属性下标 -1）
+    // 会导致色条不更新（停留/回落默认范围）。
+    connect(this->modelTreeWidget, &igQtModelDialogWidget::CloudPictureChanged, this, [this]() {
+        auto currentObj = this->modelTreeWidget->GetCurrentDataObject();
+        ui->widget_ScalarField->setCurrentDataObject(currentObj);
+        ui->widget_ScalarField->showScalarView();
+        // 左侧色条图例是场景上的覆盖 widget（igQtColorBarWidget），它独立读 scene 的
+        // 当前模型根对象 —— 同样必须改成"选中优先"，否则子块着色时它仍显示 0-255。
+        if (this->rendererWidget && this->rendererWidget->getColorBarWidget()) {
+            this->rendererWidget->getColorBarWidget()->setCurrentDataObject(currentObj);
+            this->rendererWidget->getColorBarWidget()->update();
+        }
+    });
     // Update Deformation Info when model is deleted
     connect(this->modelTreeWidget, &igQtModelDialogWidget::ModelDeleted,
             DeformationWidget, &igQtDeformationWidget::updateInfo);
@@ -5520,7 +5526,10 @@ void igQtMainWindow::initAllMySignalConnections() {
 
     connect(ui->widget_ScalarField, &igQtScalarViewWidget::ChangeShowColorManager, this, [&]() {
         if (this->ColorManagerWidget->isHidden()) {
-            // 打开前从当前模型 ColorMapper 同步色条（无模型会提示）
+            // 打开前先按"选中优先"把目标对象推给色条编辑器（多块组内选中子块时为子块），
+            // 再同步色条（无模型会提示）—— 否则色条编辑会绑到组根 mapper 上，
+            // 编辑结果写不回子块。
+            this->ColorManagerWidget->setCurrentDataObject(this->modelTreeWidget->GetCurrentDataObject());
             this->ColorManagerWidget->resetColorRange();
             this->ColorManagerWidget->show();
             this->ColorManagerWidget->raise();
@@ -5913,9 +5922,9 @@ void igQtMainWindow::initAllInteractor() {
     });
     //######### View Cloud Change ST #########
     connect(this->modelTreeWidget, &igQtModelDialogWidget::CloudPictureChanged, this, [&]() {
-        auto model = rendererWidget->GetScene()->GetCurrentModel();
-        if (model == nullptr) return;
-        auto dataObj = model->GetDataObject();
+        // 变量选择器按"选中优先"取对象：多块组内选中子块时，变量列表/当前变量
+        // 应基于子块（此前读当前模型根对象，组根属性下标为 -1 会直接早退、不更新）。
+        auto dataObj = this->modelTreeWidget->GetCurrentDataObject();
         if (dataObj == nullptr) return;
         auto attrSet = dataObj->GetAttributeSet();
         if (attrSet == nullptr) return;
