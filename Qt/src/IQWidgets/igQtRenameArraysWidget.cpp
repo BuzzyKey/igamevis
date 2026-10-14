@@ -209,8 +209,9 @@ void igQtRenameArrays::Execute() {
 
     if (auto scene = iGame::SceneManager::Instance()->GetCurrentScene()) { scene->Update(); }
 
-    ui->label_Message->setText(QStringLiteral("已生成新网格：") + QString::fromStdString(resultName) +
-                               QStringLiteral("\n") + QString::fromStdString(filter->GetMessage()));
+    //此处是显示执行后信息
+    // ui->label_Message->setText(QStringLiteral("已生成新网格：") + QString::fromStdString(resultName) +
+    //                            QStringLiteral("\n") + QString::fromStdString(filter->GetMessage()));
 
     // 新结果已成为当前模型，刷新列表：左列显示改名后的数组，右列回到原名
     BindCurrentModel();

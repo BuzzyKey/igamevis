@@ -302,16 +302,18 @@ void igQtResampleWithDataSet::Execute() {
     filter->SetTolerance((ok && tolerance > 0.0) ? tolerance : 0.0);
     // 吸附半径保持 filter 默认值（关闭）：面板不暴露该参数，接口仍保留在 filter 上
 
+    //此处是加入显示执行后信息的功能
     if (!filter->Execute()) {
         const QString message = QString::fromStdString(filter->GetMessage());
-        ui->label_Message->setText(message);
+        // ui->label_Message->setText(message);
         QMessageBox::warning(this, QStringLiteral("重采样至数据集"), message);
         return;
     }
 
     auto output = filter->GetResampledData();
     if (output == nullptr) {
-        ui->label_Message->setText(QStringLiteral("没有生成结果。"));
+        // ui->label_Message->setText(QStringLiteral("没有生成结果。"));
+        QMessageBox::warning(this, QStringLiteral("重采样至数据集"), "没有生成结果");
         return;
     }
 
@@ -326,5 +328,5 @@ void igQtResampleWithDataSet::Execute() {
     auto scene = iGame::SceneManager::Instance()->GetCurrentScene();
     if (scene != nullptr) { scene->Update(); }
 
-    ui->label_Message->setText(QString::fromStdString(filter->GetMessage()));
+    // ui->label_Message->setText(QString::fromStdString(filter->GetMessage()));
 }
