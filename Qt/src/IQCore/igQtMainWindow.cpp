@@ -99,6 +99,7 @@
 #include <IQWidgets/igQtLinearExtrusionWidget.h>
 #include <IQWidgets/igQtAxisAlignedReflectionWidget.h>
 #include <IQWidgets/igQtMergeVectorComponentsWidget.h>
+#include <IQWidgets/igQtMedianFilterWidget.h>
 #include <IQWidgets/igQtModelClipWidget.h>
 #include <IQWidgets/igQtModelDrawWidget.h>
 #include <IQWidgets/igQtModelInformationWidget.h>
@@ -1212,6 +1213,7 @@ void igQtMainWindow::initAllUnDefinedComponents() {
     this->addDockWidget(Qt::BottomDockWidgetArea, ui->dockWidget_Animation);
     this->addDockWidget(Qt::LeftDockWidgetArea, ui->dockWidget_ModelList);
     this->addDockWidget(Qt::LeftDockWidgetArea, ui->dockWidget_ContourExtract);
+    this->addDockWidget(Qt::LeftDockWidgetArea, ui->dockWidget_MedianFilter);
 
     // 禁止所有 dock 悬浮：去掉 DockWidgetFloatable
     // 同时为了防止“拖拽标题栏就被扯成系统浮动窗”，这里也把 Movable 去掉（只保留可关闭）。
@@ -1232,6 +1234,7 @@ void igQtMainWindow::initAllUnDefinedComponents() {
     ui->dockWidget_Animation->setFeatures(QDockWidget::DockWidgetClosable);
     ui->dockWidget_ModelList->setFeatures(QDockWidget::DockWidgetClosable);
     ui->dockWidget_ContourExtract->setFeatures(QDockWidget::DockWidgetClosable);
+    ui->dockWidget_MedianFilter->setFeatures(QDockWidget::DockWidgetClosable);
 
     QDockWidget* dockWidget_null = new QDockWidget("", this);
     this->addDockWidget(Qt::RightDockWidgetArea, dockWidget_null);
@@ -1252,7 +1255,7 @@ void igQtMainWindow::initAllUnDefinedComponents() {
     ui->dockWidget_Animation->hide();
     ui->dockWidget_ModelList->hide();
     ui->dockWidget_ContourExtract->hide();
-    
+    ui->dockWidget_MedianFilter->hide();
     // Setup default GUI layout.
     // 启用左侧区域的 tab 功能，使左侧 dockwidget 可以通过 tab 切换
     this->setTabPosition(Qt::LeftDockWidgetArea, QTabWidget::North);
@@ -6499,6 +6502,19 @@ void igQtMainWindow::initAllFilters() {
                 });
                 dialog->show();
             });
+
+    // ---------- 中值滤波 (Median)：追加在“开发中filter/第二批”菜单末尾 ----------
+    QAction* medianFilterAction = developingFiltersBatch2->addAction(QStringLiteral("中值滤波 (Median)"));
+    connect(medianFilterAction, &QAction::triggered, this, [this](bool) {
+        openLeftToolPanel(LeftToolPanelId::MedianFilter);
+        auto scene = iGame::SceneManager::Instance()->GetCurrentScene();
+        if (!scene) return;
+        auto CurrentModel = scene->GetCurrentModel();
+        if (!CurrentModel) return;
+        auto dataObject = CurrentModel->GetDataObject();
+        if (!dataObject) return;
+        ui->widget_MedianFilter->SetOriginDataObject(dataObject);
+    });
     // ---------- 三角面线性细分 (Subdivide)：追加在“开发中filter/第二批”菜单末尾 ----------
     QAction* subdivideAction = developingFiltersBatch2->addAction(QStringLiteral("三角面细分 (Subdivide)"));
     connect(subdivideAction, &QAction::triggered, this,
@@ -6620,6 +6636,76 @@ void igQtMainWindow::initAllFilters() {
                     modelTreeWidget->updateCloudPicture();
                     rendererWidget->update();
                     dialog->close();
+                });
+            });
+
+    // ---------- Perlin 噪声 (Perlin Noise)：追加在“新增filter/第二批”菜单末尾 ----------
+    connect(developingFiltersBatch2->addAction(QStringLiteral("Perlin 噪声 (Perlin Noise)")),
+            &QAction::triggered, this, [this](bool) {
+                auto scene = rendererWidget ? rendererWidget->GetScene() : nullptr;
+                auto currentModel = scene ? scene->GetCurrentModel() : nullptr;
+                if (!currentModel) {
+                    showDarkFramelessMessage(QStringLiteral("Perlin 噪声"), QStringLiteral("请先选择一个模型。"));
+                    return;
+                }
+                auto object = currentModel->GetDataObject();
+                if (object == nullptr || iGame::DynamicCast<iGame::PointSet>(object).IsNull()) {
+                    showDarkFramelessMessage(QStringLiteral("Perlin 噪声"),
+                                             QStringLiteral("当前对象不支持 Perlin 噪声（需要网格 / 点集）"));
+                    return;
+                }
+
+                auto* dialog = new igQtFilterDialogDockWidget(this, true);
+                dialog->setFilterTitle(QStringLiteral("Perlin 噪声"));
+                dialog->setFilterDescription(
+                        QStringLiteral("在每个输入点上采样 3D Perlin 噪声，输出新模型 + 点标量数组"));
+                const int ampId = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT,
+                                                       QStringLiteral("振幅 (Amplitude)"), "1");
+                const int fxId = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT,
+                                                      QStringLiteral("频率 X (Frequency X)"), "1");
+                const int fyId = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT,
+                                                      QStringLiteral("频率 Y (Frequency Y)"), "1");
+                const int fzId = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT,
+                                                      QStringLiteral("频率 Z (Frequency Z)"), "1");
+                const int pxId = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT,
+                                                      QStringLiteral("相位 X (Phase X)"), "0");
+                const int pyId = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT,
+                                                      QStringLiteral("相位 Y (Phase Y)"), "0");
+                const int pzId = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT,
+                                                      QStringLiteral("相位 Z (Phase Z)"), "0");
+                dialog->show();
+                dialog->setApplyFunctor([=, this]() {
+                    const int ids[7] = {ampId, fxId, fyId, fzId, pxId, pyId, pzId};
+                    const char* names[7] = {"振幅 (Amplitude)", "频率 X (Frequency X)",
+                                            "频率 Y (Frequency Y)", "频率 Z (Frequency Z)",
+                                            "相位 X (Phase X)", "相位 Y (Phase Y)",
+                                            "相位 Z (Phase Z)"};
+                    double values[7] = {0.0};
+                    bool ok = false;
+                    for (int i = 0; i < 7; ++i) {
+                        values[i] = dialog->getDouble(ids[i], ok);
+                        if (!ok) {
+                            showDarkFramelessMessage(
+                                    QStringLiteral("错误"),
+                                    QString::fromUtf8(names[i]) + QStringLiteral(" 不是有效数字。"));
+                            return;
+                        }
+                    }
+
+                    auto filter = PerlinNoiseFilter::New();
+                    filter->SetAmplitude(values[0]);
+                    filter->SetFrequency(values[1], values[2], values[3]);
+                    filter->SetPhase(values[4], values[5], values[6]);
+                    filter->SetInput(object);
+                    if (filter->Execute()) {
+                        modelTreeWidget->addDataObjectToModelTree(filter->GetOutput(), ItemSource::Algorithm);
+                        modelTreeWidget->updateCloudPicture();
+                        rendererWidget->update();
+                        dialog->close();
+                    } else {
+                        showDarkFramelessMessage(QStringLiteral("错误"),
+                                                 QStringLiteral("Perlin 噪声生成失败（需要网格 / 点集）"));
+                    }
                 });
             });
 }
@@ -7074,6 +7160,7 @@ void igQtMainWindow::initAllDockWidgetConnectWithAction() {
         if (!dataObject) return;
         ui->widget_ContourExtract->SetOriginDataObject(dataObject);
     });
+
     connect(ui->action_GenerateChart, &QAction::triggered, this, [&](bool checked) {
         auto scene = iGame::SceneManager::Instance()->GetCurrentScene();
         if (!scene) return;
@@ -7365,6 +7452,7 @@ QDockWidget* igQtMainWindow::shellDockForLeftPanel(LeftToolPanelId id) const {
     case LeftToolPanelId::Selection: return ui->dockWidget_SelectionField;
     case LeftToolPanelId::VariableDensity: return ui->dockWidget_VariableDensityField;
     case LeftToolPanelId::DataChange: return ui->dockWidget_DataChangeField;
+    case LeftToolPanelId::MedianFilter: return ui->dockWidget_MedianFilter;
     case LeftToolPanelId::Count: return nullptr;
     }
     return nullptr;
@@ -7468,6 +7556,9 @@ void igQtMainWindow::openLeftToolPanel(LeftToolPanelId id) {
     case LeftToolPanelId::DataChange:
         relocateContentToLeftTab(ui->dockWidget_DataChangeField, ui->widget_DataChangeField, QStringLiteral("路径图"), id,
                                  false);
+        break;
+    case LeftToolPanelId::MedianFilter:
+        relocateContentToLeftTab(ui->dockWidget_MedianFilter, ui->widget_MedianFilter, QStringLiteral("中值滤波"), id, false);
         break;
     case LeftToolPanelId::Count:
         break;
@@ -7764,6 +7855,15 @@ void igQtMainWindow::initAllMySignalConnections() {
                 modelTreeWidget->addDataObjectToModelTree(res, ItemSource::Algorithm);
             });
     connect(ui->widget_ContourExtract, &igQtContourExtractWidget::UpdateContourModel, this,
+            [&](DataObject::Pointer mesh) {
+                modelTreeWidget->updateCurrentModelInfo();
+                rendererWidget->update();
+            });
+    connect(ui->widget_MedianFilter, &igQtMedianFilterWidget::DrawMedianModel, this,
+            [&](iGame::DataObject::Pointer res) {
+                modelTreeWidget->addDataObjectToModelTree(res, ItemSource::Algorithm);
+            });
+    connect(ui->widget_MedianFilter, &igQtMedianFilterWidget::UpdateMedianModel, this,
             [&](DataObject::Pointer mesh) {
                 modelTreeWidget->updateCurrentModelInfo();
                 rendererWidget->update();
