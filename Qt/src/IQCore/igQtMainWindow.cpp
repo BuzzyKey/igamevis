@@ -5700,71 +5700,6 @@ void igQtMainWindow::initAllFilters() {
         });
     });
 
-    // ===== GroupDatasets: 合并数据集（多选合组，对齐 ParaView Group Datasets，放入开发中filter菜单）=====
-    QAction* groupDatasetsAction = developingFilters->addAction(QStringLiteral("合并数据集 (Group Datasets)"));
-    connect(groupDatasetsAction, &QAction::triggered, this,
-            [this](bool) {
-                // 1) 读取模型树中当前选中的数据对象（支持多选，也支持多块装配体的子块）
-                auto inputs = modelTreeWidget->GetSelectedDataObjects();
-                if (inputs.empty()) {
-                    showDarkFramelessMessage(
-                            QStringLiteral("合并数据集"),
-                            QStringLiteral("请先在左侧模型树中选中对象。\n\n"
-                                           "• 多选：按住 Ctrl 或 Shift 点击\n"
-                                           "• 支持选中多块装配体的子块"));
-                    return;
-                }
-
-                // 2) 唯一命名。必须在注册进场景【之前】算，因为它扫描的是场景的模型列表。
-                const std::string groupName = UniqueGroupDatasetsName();
-
-                // 3) 执行组合（只做容器组合，不合并几何）
-                auto filter = iGame::GroupDatasetsFilter::New();
-                filter->SetInputs(inputs);
-                filter->SetOutputName(groupName);
-                if (!filter->Execute()) {
-                    showDarkFramelessMessage(QStringLiteral("合并数据集失败"),
-                                             QString::fromStdString(filter->GetMessage()));
-                    return;
-                }
-
-                auto group = filter->GetOutput(0);
-                if (!group) {
-                    showDarkFramelessMessage(QStringLiteral("合并数据集失败"),
-                                             QStringLiteral("未生成结果节点。"));
-                    return;
-                }
-
-                // 4) 挂到场景 + 模型树。
-                //    注意：addDataObjectToModelTree 内部已经调用 scene->AddModel()，
-                //    这里不要再单独 AddModel，否则会重复注册出冗余节点。
-                modelTreeWidget->addDataObjectToModelTree(group, ItemSource::Algorithm);
-
-                // 5) 【不隐藏原始输入】。
-                //
-                //    组的每个子块都是原模型的【深拷贝克隆】（几何 / 属性 / 显隐样式各持一份），
-                //    隐藏原模型不会影响组的内容，隐藏组内的块也不会影响原模型 —— 新旧完全独立。
-                //    因此原模型保持原状即可；这里仅刷新全树眼睛图标，让每处图标都反映
-                //    各自对象的真实显隐状态。
-                modelTreeWidget->RefreshModelTreeVisibilityIcons();
-
-                rendererWidget->update();
-
-                // 6) 汇报结果（子块按序号列出，重名也能区分）
-                QString blockList;
-                const auto& blockNames = filter->GetBlockNames();
-                for (size_t i = 0; i < blockNames.size(); ++i) {
-                    blockList += QStringLiteral("%1. %2\n")
-                                         .arg(static_cast<int>(i) + 1)
-                                         .arg(QString::fromStdString(blockNames[i]));
-                }
-                const QString report = QStringLiteral("已合并 %1 个对象 → %2\n%3")
-                                               .arg(filter->GetGroupedCount())
-                                               .arg(QString::fromStdString(groupName))
-                                               .arg(blockList);
-                showDarkFramelessMessage(QStringLiteral("合并数据集"), report, true);
-            });
-
 
     bindDevelopmentAction("deflect_normals", [=, this]() {
         const QString title = QStringLiteral("法向偏转");
@@ -6589,6 +6524,72 @@ void igQtMainWindow::initAllFilters() {
                     rendererWidget->update();
                     dialog->close();
                 });
+            });
+
+    // ===== GroupDatasets: 合并数据集（多选合组，对齐 ParaView Group Datasets）=====
+    // 注册到「新增filter/第二批」菜单末尾（与其它新增 filter 一致）。
+    QAction* groupDatasetsAction = developingFiltersBatch2->addAction(QStringLiteral("合并数据集 (Group Datasets)"));
+    connect(groupDatasetsAction, &QAction::triggered, this,
+            [this](bool) {
+                // 1) 读取模型树中当前选中的数据对象（支持多选，也支持多块装配体的子块）
+                auto inputs = modelTreeWidget->GetSelectedDataObjects();
+                if (inputs.empty()) {
+                    showDarkFramelessMessage(
+                            QStringLiteral("合并数据集"),
+                            QStringLiteral("请先在左侧模型树中选中对象。\n\n"
+                                           "• 多选：按住 Ctrl 或 Shift 点击\n"
+                                           "• 支持选中多块装配体的子块"));
+                    return;
+                }
+
+                // 2) 唯一命名。必须在注册进场景【之前】算，因为它扫描的是场景的模型列表。
+                const std::string groupName = UniqueGroupDatasetsName();
+
+                // 3) 执行组合（只做容器组合，不合并几何）
+                auto filter = iGame::GroupDatasetsFilter::New();
+                filter->SetInputs(inputs);
+                filter->SetOutputName(groupName);
+                if (!filter->Execute()) {
+                    showDarkFramelessMessage(QStringLiteral("合并数据集失败"),
+                                             QString::fromStdString(filter->GetMessage()));
+                    return;
+                }
+
+                auto group = filter->GetOutput(0);
+                if (!group) {
+                    showDarkFramelessMessage(QStringLiteral("合并数据集失败"),
+                                             QStringLiteral("未生成结果节点。"));
+                    return;
+                }
+
+                // 4) 挂到场景 + 模型树。
+                //    注意：addDataObjectToModelTree 内部已经调用 scene->AddModel()，
+                //    这里不要再单独 AddModel，否则会重复注册出冗余节点。
+                modelTreeWidget->addDataObjectToModelTree(group, ItemSource::Algorithm);
+
+                // 5) 【不隐藏原始输入】。
+                //
+                //    组的每个子块都是原模型的【深拷贝克隆】（几何 / 属性 / 显隐样式各持一份），
+                //    隐藏原模型不会影响组的内容，隐藏组内的块也不会影响原模型 —— 新旧完全独立。
+                //    因此原模型保持原状即可；这里仅刷新全树眼睛图标，让每处图标都反映
+                //    各自对象的真实显隐状态。
+                modelTreeWidget->RefreshModelTreeVisibilityIcons();
+
+                rendererWidget->update();
+
+                // 6) 汇报结果（子块按序号列出，重名也能区分）
+                QString blockList;
+                const auto& blockNames = filter->GetBlockNames();
+                for (size_t i = 0; i < blockNames.size(); ++i) {
+                    blockList += QStringLiteral("%1. %2\n")
+                                         .arg(static_cast<int>(i) + 1)
+                                         .arg(QString::fromStdString(blockNames[i]));
+                }
+                const QString report = QStringLiteral("已合并 %1 个对象 → %2\n%3")
+                                               .arg(filter->GetGroupedCount())
+                                               .arg(QString::fromStdString(groupName))
+                                               .arg(blockList);
+                showDarkFramelessMessage(QStringLiteral("合并数据集"), report, true);
             });
 }
 
