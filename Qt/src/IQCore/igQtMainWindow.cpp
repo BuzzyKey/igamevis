@@ -5694,9 +5694,7 @@ void igQtMainWindow::initAllFilters() {
         mainLayout->setSpacing(8);
 
         QLabel* tip = new QLabel(
-                QStringLiteral("勾选需要传递到输出的属性（默认全选），未勾选的属性会被丢弃。\n"
-                               "点数据与单元数据分别记录：点、单元上的同名属性（例如都叫 test）可以只保留其中一项。\n"
-                               "输出与输入共享几何与拓扑，被保留的数组也按引用共享，不再深拷贝。"),
+                QStringLiteral("勾选需要传递到输出的属性，未勾选的属性会被丢弃。"),
                 content);
         tip->setWordWrap(true);
         mainLayout->addWidget(tip);
