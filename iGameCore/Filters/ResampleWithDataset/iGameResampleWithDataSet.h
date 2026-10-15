@@ -36,13 +36,14 @@ IGAME_NAMESPACE_BEGIN
  *     VolumeMesh / StructuredMesh），类型与输入 1 保持一致；
  *   - 属性：
  *     ① 输入 0 的点数据插值到输出点上；
- *     ② validpointmask（UnsignedCharArray，1 = 该采样点插值成功，0 = 无效；无效点的
+ *     ② 输入 0 的单元数据按命中单元拷到输出点上（与 vtkProbeFilter 的 InputCellArrays 一致：
+ *        源单元数组进入**输出点数据**，不做单元内插值；若同一名字同时存在于输入 0 的点数据与
+ *        单元数据，只取点数据）；
+ *     ③ validpointmask（UnsignedCharArray，1 = 该采样点插值成功，0 = 无效；无效点的
  *        各插值属性填 0）；
- *     （不包含）输入 0 的单元数据：本实现**不**把被采样网格的单元数组带到输出上
- *     （vtkProbeFilter 会把源单元数组拷成输出的点数据，这里按需求去掉：输出只含插值后的
- *     点数据与 validpointmask）；
  *     （不包含）输入 1 自身的属性数组：本实现不复制「采样点网格」自带的数组，
- *     与 vtkProbeFilter 的默认值 PassPointArrays = 0 / PassCellArrays = 0 一致。
+ *     与 vtkProbeFilter 的默认值 PassPointArrays = 0 / PassCellArrays = 0 一致
+ *     （注意这两个开关针对的是探针输入，不是被采样网格）。
  *
  * 采样与容差：
  *   - 采样位置是输入 1 的所有点，不再沿线均匀生成；
@@ -165,9 +166,13 @@ private:
     double DistanceToCellBoundary(const UnstructuredMesh::Pointer& mesh, igIndex cellId, const Point& p, Point& closest);
 
     /* ---------------- 属性处理 ---------------- */
-    /** 输入 0 的点数据 → 输出点（被采样网格的单元数据不参与输出） */
-    void InterpolatePointData(AttributeSet* inSet, AttributeSet::Pointer outSet,
-                              const std::vector<SampleLocation>& locations, int sampleNum);
+    /** 输入 0 的点数据插值 → 输出点；返回已产出的数组名（供单元数据判重：同名时点数据优先） */
+    std::vector<std::string> InterpolatePointData(AttributeSet* inSet, AttributeSet::Pointer outSet,
+                                                 const std::vector<SampleLocation>& locations, int sampleNum);
+    /** 输入 0 的单元数据按命中单元 → 输出点；pointNames 中的名字（源点数据）优先，同名跳过 */
+    void CopyCellData(AttributeSet* inSet, AttributeSet::Pointer outSet,
+                      const std::vector<SampleLocation>& locations, int sampleNum,
+                      const std::vector<std::string>& pointNames);
     void AddValidPointMask(AttributeSet::Pointer outSet, int sampleNum);
 
     ResampleWithDataSet() {

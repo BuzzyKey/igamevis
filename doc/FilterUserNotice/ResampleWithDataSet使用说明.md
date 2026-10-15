@@ -6,7 +6,7 @@
 
 两个输入（语义与 `vtkProbeFilter` 一致，**注意 VTK 的命名与直觉相反**）：
 
-- 输入 0「**被采样网格**」= VTK 的 **Source**：提供数据的网格。只有它的**点数据**被插值到采样点上；它的**单元数据不进入输出**，单元只用于判断采样点命中哪个单元。网格类型不限（`PointSet` / `SurfaceMesh` / `VolumeMesh` / `UnstructuredMesh` / `StructuredMesh` / `LagrangeUnstructuredMesh` 以及包含它们的容器），都会先归一化为一份 `UnstructuredMesh`。
+- 输入 0「**被采样网格**」= VTK 的 **Source**：提供数据的网格。它的**点数据**被插值到采样点上，它的**单元数据**按「采样点命中哪个单元」拷到采样点上（进入输出的**点数据**）。网格类型不限（`PointSet` / `SurfaceMesh` / `VolumeMesh` / `UnstructuredMesh` / `StructuredMesh` / `LagrangeUnstructuredMesh` 以及包含它们的容器），都会先归一化为一份 `UnstructuredMesh`。
 - 输入 1「**采样点网格**」= VTK 的 **Input**：探针几何。它的所有点就是采样位置，它的几何与拓扑会被原样深拷贝成输出。
 
 输出（`GetOutput(0)`）包含：
@@ -14,9 +14,9 @@
 - 几何与拓扑：输入 1 的同类型深拷贝，类型与输入 1 保持一致（`PointSet` / `SurfaceMesh` / `UnstructuredMesh` / `VolumeMesh` / `StructuredMesh`）；
 - 属性：
   1. 输入 0 的**点数据**插值到输出点上；
-  2. `validpointmask`（`UnsignedCharArray`，`1` = 该采样点插值成功，`0` = 无效；无效点的各插值属性填 `0`）；
-  3. **不包含**输入 0 的**单元数据**：被采样网格的 `CELL_DATA` 数组不会以任何形式进入输出（单元只用于定位采样点）；
-  4. **不包含**输入 1 自身的属性数组（对齐 VTK 的默认值 `PassPointArrays = 0` / `PassCellArrays = 0`）：输出只含上面 1~2 两项。
+  2. 输入 0 的**单元数据**按命中单元拷到输出点上（与 `vtkProbeFilter` 的 `InputCellArrays` 一致：源单元数组进入**输出点数据**，整段 tuple 拷贝、不在单元内插值；若同名数组同时存在于输入 0 的点数据与单元数据，只取点数据；无效采样点填 `0`）；
+  3. `validpointmask`（`UnsignedCharArray`，`1` = 该采样点插值成功，`0` = 无效；无效点的各插值属性填 `0`）；
+  4. **不包含**输入 1 自身的属性数组（对齐 VTK 的默认值 `PassPointArrays = 0` / `PassCellArrays = 0`，这两个开关针对的是探针输入而不是被采样网格）：输出只含上面 1~3 三项。
 
 采样位置、容差与吸附：
 
@@ -142,7 +142,7 @@ int main() {
 Examples/Filter/TestResampleWithDataSet.cpp
 ```
 
-该示例覆盖：自采样（探针 = 被采样网格本身，有效点插值应等于原值）、点云探针（体心 = 3.5、网格外点无效且填 0）、吸附半径开关、`validpointmask` 与 API 一致性、采样点网格自身数组与**被采样网格单元数组**都不出现在输出中的规则，以及缺少输入时的错误路径。
+该示例覆盖：自采样（探针 = 被采样网格本身，有效点插值应等于原值）、点云探针（体心 = 3.5、网格外点无效且填 0）、吸附半径开关、`validpointmask` 与 API 一致性、被采样网格单元数组按命中单元进入输出点属性、采样点网格自身数组不被复制，以及缺少输入时的错误路径。
 
 ## 与 ParaView / VTK 的差异
 
@@ -152,8 +152,7 @@ Examples/Filter/TestResampleWithDataSet.cpp
 4. 支持复合 / 多块数据集，但**合并成一份网格**再采样（等价先做 Merge Blocks）：VTK 的 executive 会逐块展开并保留多块结构，因此多块输入的输出结构与 VTK 不同（本实现只有一个输出网格，采样点同时落在多块时序号靠前的块先命中）；
 5. 没有 field 数据（框架的 `AttributeSet` 只有 `IG_POINT` / `IG_CELL` 两种附着），也没有 `vtkOriginalPointIds` / `vtkOriginalCellIds` 这类附加数组；
 6. 整型 / 字符型点数据数组按**原类型**承载插值结果（由数组自身截断），不再统一转成 `float`，与 `vtkProbeFilter` 的数组类型行为一致；
-7. 单元包含判定的参数域容差与 VTK 一致（`pcoords ∈ [-0.001, 1.001]`），贴单元边界的采样点与 VTK 得到相同的有效 / 无效判定；
-8. **不把被采样网格的单元数据拷到输出点上**：`vtkProbeFilter` 会把源单元数组按命中单元拷成输出的 `PointData`（内部的 `InputCellArrays`），本实现按需求去掉——输出只含「源点数据插值 + `validpointmask`」。需要单元场参与下游计算时，请先用其它滤波器（例如单元数据转点数据的算子）把单元数组转到点上再采样。
+7. 单元包含判定的参数域容差与 VTK 一致（`pcoords ∈ [-0.001, 1.001]`），贴单元边界的采样点与 VTK 得到相同的有效 / 无效判定。
 
 ## 注意事项
 
@@ -167,4 +166,4 @@ Examples/Filter/TestResampleWithDataSet.cpp
 8. 采样点网格自身的数组**不会**被复制到输出（与 `vtkProbeFilter` 默认的 `PassPointArrays` / `PassCellArrays` 一致）；若确实需要这些数组，请自行用其它滤波器处理。
 9. `Execute()` 失败时 `GetOutput(0)` 为 `nullptr`，失败原因从 `GetMessage()` 获取（例如「未选择「被采样网格」」「「采样点网格」没有点，无法确定采样位置」）。
 10. 点的定位走均匀网格加速（按被采样网格包围盒划分），一次执行的采样点数等于「采样点网格」的点数；点数很多时建议先把被采样网格裁剪到关心的区域再采样。
-11. 输出的属性只有「被采样网格的点数据插值结果 + `validpointmask`」：**被采样网格的单元数据（`CELL_DATA`）不会进入输出**（单元只用于定位采样点），采样点网格自带的数组也不会被复制。
+11. 输出属性 = 「被采样网格的点数据插值 + 其单元数据按命中单元拷贝（同名时点数据优先）+ `validpointmask`」，与 `vtkProbeFilter` 一致；被采样网格的 `CELL_DATA` 是以**点属性**形式出现在输出上的（每个采样点取命中单元的值），采样点网格自带的数组不会被复制。

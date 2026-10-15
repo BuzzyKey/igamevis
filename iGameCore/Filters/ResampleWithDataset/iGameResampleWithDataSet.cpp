@@ -2212,14 +2212,16 @@ bool ResampleWithDataSet::Execute() {
         ++m_SnappedPointCount;
     }
 
-    // 属性：① 被采样网格的点数据插值 ② validpointmask
-    // 注意一：被采样网格的**单元数据不进入输出**（单元只用于定位采样点命中哪个单元），
-    //         输出只含插值后的点数据与 validpointmask。
-    // 注意二：对齐 vtkProbeFilter 的默认值（PassPointArrays = 0、PassCellArrays = 0），
-    //         「采样点网格」自身的属性数组也不复制到输出里。
+    // 属性：① 被采样网格的点数据插值 ② 其单元数据按命中单元拷到输出点 ③ validpointmask
+    // 与 vtkProbeFilter 一致：源单元数组进入**输出点数据**（VTK 内部的 InputCellArrays），
+    // 同名时点数据优先；无效采样点各属性填 0。
+    // 注意：对齐 vtkProbeFilter 的默认值（PassPointArrays = 0、PassCellArrays = 0），
+    // 「采样点网格」自身的属性数组不复制到输出里（这两个开关针对的是探针输入，不是被采样网格）。
     AttributeSet* inAttr = mesh->GetAttributeSet();
     AttributeSet::Pointer outAttr = AttributeSet::New();
-    InterpolatePointData(inAttr, outAttr, locations, sampleNum);
+    const std::vector<std::string> producedPointNames =
+            InterpolatePointData(inAttr, outAttr, locations, sampleNum);
+    CopyCellData(inAttr, outAttr, locations, sampleNum, producedPointNames);
     AddValidPointMask(outAttr, sampleNum);
 
     // 输出 = 采样点网格的同类型深拷贝（几何/拓扑独立），属性换成采样结果
@@ -2686,11 +2688,12 @@ double ResampleWithDataSet::DistanceToCellBoundary(const UnstructuredMesh::Point
 /* ------------------------------------------------------------------ */
 /* 属性插值                                                            */
 /* ------------------------------------------------------------------ */
-void ResampleWithDataSet::InterpolatePointData(AttributeSet* inSet, AttributeSet::Pointer outSet,
+std::vector<std::string> ResampleWithDataSet::InterpolatePointData(AttributeSet* inSet, AttributeSet::Pointer outSet,
                                           const std::vector<SampleLocation>& locations, int sampleNum) {
-    if (inSet == nullptr || outSet == nullptr) { return; }
+    std::vector<std::string> producedPointNames;
+    if (inSet == nullptr || outSet == nullptr) { return producedPointNames; }
     auto all = inSet->GetAllAttributes();
-    if (all == nullptr) { return; }
+    if (all == nullptr) { return producedPointNames; }
 
     std::vector<double> values;
     for (IGsize i = 0; i < all->GetNumberOfElements(); ++i) {
@@ -2731,6 +2734,60 @@ void ResampleWithDataSet::InterpolatePointData(AttributeSet* inSet, AttributeSet
             dst->SetElement(static_cast<IGsize>(j), values.data());
         }
 
+        producedPointNames.push_back(src->GetName());
+        outSet->AddAttribute(attr.type, IG_POINT, dst, attr.GetDataRange());
+    }
+    return producedPointNames;
+}
+
+/**
+ * 输入 0 的单元数据 → 输出点（与 vtkProbeFilter 的 InputCellArrays 一致）：
+ * 每个采样点取「命中单元」的整个 tuple 拷到输出点上，不做单元内插值；
+ * 无效采样点填 0；若同名数组已由源点数据产出（pointNames），则点数据优先、跳过单元数组
+ * （对应 VTK 源码 InitializeForProbing 里的 !outPD->GetArray(inArray->GetName()) 判断）。
+ */
+void ResampleWithDataSet::CopyCellData(AttributeSet* inSet, AttributeSet::Pointer outSet,
+                                  const std::vector<SampleLocation>& locations, int sampleNum,
+                                  const std::vector<std::string>& pointNames) {
+    if (inSet == nullptr || outSet == nullptr) { return; }
+    auto all = inSet->GetAllAttributes();
+    if (all == nullptr) { return; }
+
+    std::vector<double> values;
+    for (IGsize i = 0; i < all->GetNumberOfElements(); ++i) {
+        auto& attr = all->GetElement(i);
+        if (attr.isDeleted || attr.pointer == nullptr) { continue; }
+        if (attr.attachmentType != IG_CELL) { continue; }
+
+        auto src = attr.pointer;
+
+        // 同名数组若已由源点数据产出，则点数据优先（与 vtkProbeFilter 一致：
+        // “If an array of the same name exists both in source's point and cell data,
+        //   only the one from the point data is probed.”）
+        if (std::find(pointNames.begin(), pointNames.end(), src->GetName()) != pointNames.end()) { continue; }
+
+        const int dim = src->GetDimension();
+        if (dim <= 0) { continue; }
+
+        // Cell Data 是复制关系，完整保留原数组数据类型与分量数
+        auto dst = CreateArrayObject(src->GetArrayType());
+        if (dst == nullptr) { continue; }
+        dst->SetName(src->GetName());
+        dst->SetDimension(dim);
+        dst->Resize(static_cast<IGsize>(sampleNum));
+
+        const IGsize cellNum = src->GetNumberOfElements();
+        values.assign(static_cast<size_t>(dim), 0.0);
+        for (int j = 0; j < sampleNum; ++j) {
+            std::fill(values.begin(), values.end(), 0.0); // 无效采样点填 0
+            const igIndex cellId = locations[static_cast<size_t>(j)].cellId;
+            if (cellId >= 0 && static_cast<IGsize>(cellId) < cellNum) {
+                src->GetElement(static_cast<IGsize>(cellId), values.data());
+            }
+            dst->SetElement(static_cast<IGsize>(j), values.data());
+        }
+
+        // 被采样网格的单元数据拷贝到采样点上，因此附着类型是 IG_POINT
         outSet->AddAttribute(attr.type, IG_POINT, dst, attr.GetDataRange());
     }
 }
