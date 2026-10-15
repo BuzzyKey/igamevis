@@ -10,6 +10,7 @@
 #include "DataProcessing/OverlappingCellsDetector/iGameOverlappingCellsDetectorFilter.h"
 #include "ForceStaticMesh/iGameForceStaticMeshFilter.h"
 #include "GhostCell/iGameGhostCellFilter.h"
+#include "GenerateSurfaceTangents/iGameGenerateSurfaceTangentsFilter.h"
 #include "MeshMetrics/iGameCellMeshMetricsFilter.h"
 #include "ModelSurface/iGameMultiBlockGeometryFilter.h"
 #include "MyFilter/iGameValidateCellsFilter.h"
@@ -54,6 +55,7 @@
 #include "FeatureExtraction/iGameDeflectNormalsFilter.h"
 #include "Convert/iGamePointSetToOctreeFilter.h"
 #include "Convert/iGameResampleToImageFilter.h"
+#include <IQWidgets/igQtResampleToImageWidget.h>
 #include "MeshQuality/iGameMeshQualityFilter.h"
 
 #include "Transformation/iGameTransformFilter.h"
@@ -100,11 +102,13 @@
 #include <IQWidgets/igQtLinearExtrusionWidget.h>
 #include <IQWidgets/igQtAxisAlignedReflectionWidget.h>
 #include <IQWidgets/igQtMergeVectorComponentsWidget.h>
+#include <IQWidgets/igQtMedianFilterWidget.h>
 #include <IQWidgets/igQtModelClipWidget.h>
 #include <IQWidgets/igQtModelDrawWidget.h>
 #include <IQWidgets/igQtModelInformationWidget.h>
 #include <IQWidgets/igQtParallelCoordinatesWidget.h>
 #include <IQWidgets/igQtTensorWidget.h>
+#include <IQWidgets/igQtTextureMapToPlaneWidget.h>
 #include <IQWidgets/igQtVariableCorrelationWidget.h>
 #include <IQWidgets/igQtPartFocusWidget.h>
 #include <IQWidgets/igQtAttributeSelectWidget.h>
@@ -189,6 +193,45 @@
 
 #include "ui_igQtVariableCorrelationWidget.h"
 #include <IQWidgets/igQtRoundedCornerHelper.h>
+
+#include "GroupDatasets/iGameGroupDatasetsFilter.h"
+
+#include <set>
+
+// GroupDatasets 结果节点的唯一命名：
+// 扫描场景中形如 "GroupDatasets_<数字>" 的模型名，取【最小空缺序号】（删除后可复用）。
+// 两处判定要点：
+//   1) 必须以 "GroupDatasets_" 【开头】—— 用 rfind(prefix, 0) == 0 表达，
+//      避免把 "X_GroupDatasets_1" 这类名字误算进来；
+//   2) 后缀必须【全是数字】—— 用 find_first_not_of("0123456789") == npos 表达，
+//      避免把用户自定义的 "GroupDatasets_test" 拿去 std::stoi 抛异常。
+static std::string UniqueGroupDatasetsName() {
+    const std::string prefix = "GroupDatasets_";
+    std::set<int> used;
+
+    auto scene = iGame::SceneManager::Instance()->GetCurrentScene();
+    if (scene != nullptr) {
+        auto modelList = scene->GetModelList();
+        if (modelList != nullptr) {
+            for (auto it = modelList->Begin(); it != modelList->End(); ++it) {
+                if (it->second == nullptr || it->second->GetDataObject() == nullptr) { continue; }
+                const std::string& name = it->second->GetDataObject()->GetName();
+
+                if (name.rfind(prefix, 0) != 0) { continue; } // 必须以 prefix 开头
+                const std::string suffix = name.substr(prefix.size());
+                if (suffix.empty() ||
+                    suffix.find_first_not_of("0123456789") != std::string::npos) {
+                    continue; // 后缀必须全是数字
+                }
+                used.insert(std::stoi(suffix));
+            }
+        }
+    }
+
+    int n = 1;
+    while (used.count(n) != 0) { ++n; }
+    return prefix + std::to_string(n);
+}
 
 namespace {
 const QColor kFloatingCoverColor(0x1E, 0x1E, 0x1E);
@@ -1213,6 +1256,7 @@ void igQtMainWindow::initAllUnDefinedComponents() {
     this->addDockWidget(Qt::BottomDockWidgetArea, ui->dockWidget_Animation);
     this->addDockWidget(Qt::LeftDockWidgetArea, ui->dockWidget_ModelList);
     this->addDockWidget(Qt::LeftDockWidgetArea, ui->dockWidget_ContourExtract);
+    this->addDockWidget(Qt::LeftDockWidgetArea, ui->dockWidget_MedianFilter);
 
     // 禁止所有 dock 悬浮：去掉 DockWidgetFloatable
     // 同时为了防止“拖拽标题栏就被扯成系统浮动窗”，这里也把 Movable 去掉（只保留可关闭）。
@@ -1233,6 +1277,7 @@ void igQtMainWindow::initAllUnDefinedComponents() {
     ui->dockWidget_Animation->setFeatures(QDockWidget::DockWidgetClosable);
     ui->dockWidget_ModelList->setFeatures(QDockWidget::DockWidgetClosable);
     ui->dockWidget_ContourExtract->setFeatures(QDockWidget::DockWidgetClosable);
+    ui->dockWidget_MedianFilter->setFeatures(QDockWidget::DockWidgetClosable);
 
     QDockWidget* dockWidget_null = new QDockWidget("", this);
     this->addDockWidget(Qt::RightDockWidgetArea, dockWidget_null);
@@ -1253,7 +1298,7 @@ void igQtMainWindow::initAllUnDefinedComponents() {
     ui->dockWidget_Animation->hide();
     ui->dockWidget_ModelList->hide();
     ui->dockWidget_ContourExtract->hide();
-    
+    ui->dockWidget_MedianFilter->hide();
     // Setup default GUI layout.
     // 启用左侧区域的 tab 功能，使左侧 dockwidget 可以通过 tab 切换
     this->setTabPosition(Qt::LeftDockWidgetArea, QTabWidget::North);
@@ -2000,13 +2045,11 @@ void igQtMainWindow::initAllFilters() {
     };
 
     auto currentFilterInput = [this](const QString& title) -> DataObject::Pointer {
-        if (rendererWidget->GetScene()->GetCurrentModel() == nullptr) {
-            showDarkFramelessMessage(title, QStringLiteral("请先加载并选择一个模型。"));
-            return nullptr;
-        }
-        auto obj = rendererWidget->GetScene()->GetCurrentModel()->GetDataObject();
+        // P2-2：优先取模型树【当前选中】的数据对象 —— 选中多块装配体的子块时返回子块本身，
+        // 无任何选中时回落为当前模型的根 DataObject（见 igQtModelDialogWidget::GetCurrentDataObject）。
+        auto obj = modelTreeWidget->GetCurrentDataObject();
         if (!obj) {
-            showDarkFramelessMessage(title, QStringLiteral("当前模型没有可用数据。"));
+            showDarkFramelessMessage(title, QStringLiteral("请先加载并选择一个模型。"));
             return nullptr;
         }
         return obj;
@@ -5115,6 +5158,7 @@ void igQtMainWindow::initAllFilters() {
             developingFilters->actions().last()->setData(QString::fromLatin1(entry.id));
         }
     }
+
     QAction* cellMetricsDevelopment = developingFilters->addAction(
             QStringLiteral("单元网格指标 (CellMeshMetrics)"));
     cellMetricsDevelopment->setData(QStringLiteral("cell_mesh_metrics"));
@@ -5674,28 +5718,164 @@ void igQtMainWindow::initAllFilters() {
         const QString title = QStringLiteral("传递过滤数据数组");
         auto input = currentFilterInput(title);
         if (!input) return;
-        auto* dialog = new igQtFilterDialogDockWidget(this, true);
-        dialog->setFilterTitle(title);
-        dialog->setFilterDescription(QStringLiteral("输入要移除的数组名，以逗号分隔；留空时保留全部数组。"));
-        const int names = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT,
-                QStringLiteral("移除数组"), "");
-        dialog->show();
-        dialog->setApplyFunctor([=, this]() {
-            auto* edit = qobject_cast<QLineEdit*>(dialog->getWidget(names));
-            if (!edit) return;
-            std::vector<std::string> arrayNames;
-            for (const QString& name : edit->text().split(',', Qt::SkipEmptyParts)) {
-                const QString trimmed = name.trimmed();
-                if (!trimmed.isEmpty()) arrayNames.push_back(trimmed.toStdString());
+
+        auto attrSet = input->GetAttributeSet();
+        if (attrSet == nullptr) {
+            showDarkFramelessMessage(title, QStringLiteral("当前模型没有属性集。"));
+            return;
+        }
+
+        // 收集属性名称：点数据与单元数据分开收集，后续也分开记录勾选结果
+        QStringList pointNames;
+        QStringList cellNames;
+        auto collectNames = [](auto attrs, QStringList& out) {
+            if (!attrs) return;
+            for (IGsize i = 0; i < attrs->GetNumberOfElements(); ++i) {
+                auto& attr = attrs->GetElement(i);
+                if (attr.IsNone() || !attr.pointer) continue;
+                out.append(QString::fromStdString(attr.pointer->GetName()));
             }
+        };
+        collectNames(attrSet->GetAllPointAttributes(), pointNames);
+        collectNames(attrSet->GetAllCellAttributes(), cellNames);
+        if (pointNames.isEmpty() && cellNames.isEmpty()) {
+            showDarkFramelessMessage(title, QStringLiteral("当前模型没有任何属性可传递。"));
+            return;
+        }
+
+        // ---------- 属性多选框对话框 ----------
+        igQtChromeFramelessDialog* dlg = new igQtChromeFramelessDialog(this);
+        dlg->setDialogTitle(QStringLiteral("选择要传递的属性"));
+        dlg->setMaximizeEnabled(false);
+        dlg->setAttribute(Qt::WA_DeleteOnClose);
+
+        QWidget* content = new QWidget(dlg->contentHost());
+        content->setStyleSheet(
+                "QWidget { background-color: #252526; color: #D4D4D4; }"
+                "QCheckBox { color: #D4D4D4; spacing: 6px; }"
+                "QCheckBox::indicator { width: 16px; height: 16px; }"
+                "QCheckBox::indicator:unchecked { border: 1px solid #6A6A6A; background-color: #3A3A3A; }"
+                "QCheckBox::indicator:checked { border: 1px solid #0E639C; background-color: #0E639C; }"
+                "QCheckBox::indicator:unchecked:hover { border: 1px solid #9A9A9A; }"
+                "QCheckBox::indicator:checked:hover { background-color: #1177BB; }"
+                "QPushButton { background-color: #3A3A3A; color: #D4D4D4; border: 1px solid #4A4A4A; "
+                "              padding: 6px 12px; border-radius: 4px; }"
+                "QPushButton:hover { background-color: #4A4A4A; border-color: #5A5A5A; }"
+                "QPushButton:pressed { background-color: #2A2A2A; }"
+                "QScrollArea { background-color: #1E1E1E; border: none; }"
+                "QScrollBar:vertical { background: #1E1E1E; width: 10px; margin: 0; }"
+                "QScrollBar::handle:vertical { background: #4A4A4A; border-radius: 5px; min-height: 20px; }"
+                "QScrollBar::handle:vertical:hover { background: #5A5A5A; }"
+                "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }");
+        QVBoxLayout* mainLayout = new QVBoxLayout(content);
+        mainLayout->setContentsMargins(12, 12, 12, 12);
+        mainLayout->setSpacing(8);
+
+        QLabel* tip = new QLabel(
+                QStringLiteral("勾选需要传递到输出的属性，未勾选的属性会被丢弃。"),
+                content);
+        tip->setWordWrap(true);
+        mainLayout->addWidget(tip);
+
+        QScrollArea* scrollArea = new QScrollArea(content);
+        scrollArea->setWidgetResizable(true);
+        scrollArea->setFrameShape(QFrame::NoFrame);
+        QWidget* listWidget = new QWidget(scrollArea);
+        QVBoxLayout* listLayout = new QVBoxLayout(listWidget);
+        listLayout->setSpacing(4);
+        listLayout->setContentsMargins(0, 0, 0, 0);
+
+        QList<QCheckBox*> pointBoxes;
+        QList<QCheckBox*> cellBoxes;
+        auto addSection = [&](const QString& header, const QStringList& names, const QString& emptyTip,
+                              QList<QCheckBox*>& boxes) {
+            QLabel* headerLabel = new QLabel(header, listWidget);
+            QFont headerFont = headerLabel->font();
+            headerFont.setBold(true);
+            headerLabel->setFont(headerFont);
+            listLayout->addWidget(headerLabel);
+
+            if (names.isEmpty()) {
+                listLayout->addWidget(new QLabel(emptyTip, listWidget));
+                return;
+            }
+
+            QHBoxLayout* btnRow = new QHBoxLayout();
+            btnRow->setContentsMargins(0, 0, 0, 0);
+            QPushButton* selectAllBtn = new QPushButton(QStringLiteral("全选"), listWidget);
+            QPushButton* deselectAllBtn = new QPushButton(QStringLiteral("全不选"), listWidget);
+            btnRow->addWidget(selectAllBtn);
+            btnRow->addWidget(deselectAllBtn);
+            btnRow->addStretch();
+            listLayout->addLayout(btnRow);
+
+            for (const QString& name: names) {
+                QCheckBox* cb = new QCheckBox(name, listWidget);
+                cb->setChecked(true); // 默认全部选中
+                boxes.append(cb);
+                listLayout->addWidget(cb);
+            }
+            // 按值捕获复选框列表：列表内容此时已经填充完毕
+            const QList<QCheckBox*> sectionBoxes = boxes;
+            connect(selectAllBtn, &QPushButton::clicked, listWidget,
+                    [sectionBoxes]() { for (QCheckBox* cb: sectionBoxes) cb->setChecked(true); });
+            connect(deselectAllBtn, &QPushButton::clicked, listWidget,
+                    [sectionBoxes]() { for (QCheckBox* cb: sectionBoxes) cb->setChecked(false); });
+        };
+        addSection(QStringLiteral("点数据 (Point Data)"), pointNames,
+                   QStringLiteral("（无点属性）"), pointBoxes);
+        addSection(QStringLiteral("单元数据 (Cell Data)"), cellNames,
+                   QStringLiteral("（无单元属性）"), cellBoxes);
+        listWidget->setLayout(listLayout);
+        scrollArea->setWidget(listWidget);
+        mainLayout->addWidget(scrollArea);
+
+        QDialogButtonBox* buttonBox =
+                new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, content);
+        mainLayout->addWidget(buttonBox);
+
+        dlg->setContentWidget(content);
+        dlg->resize(420, 560);
+
+        connect(buttonBox, &QDialogButtonBox::accepted, this,
+                [this, dlg, input, pointBoxes, cellBoxes, pointNames, cellNames, title,
+                 refreshFilterResult]() {
+            std::vector<std::string> selectedPointNames;
+            std::vector<std::string> selectedCellNames;
+            for (int i = 0; i < pointBoxes.size(); ++i) {
+                if (pointBoxes[i]->isChecked()) selectedPointNames.push_back(pointNames[i].toStdString());
+            }
+            for (int i = 0; i < cellBoxes.size(); ++i) {
+                if (cellBoxes[i]->isChecked()) selectedCellNames.push_back(cellNames[i].toStdString());
+            }
+            if (selectedPointNames.empty() && selectedCellNames.empty()) {
+                showDarkFramelessMessage(title, QStringLiteral("请至少勾选一个属性。"));
+                return;
+            }
+
             auto filter = PassArrays::New();
             filter->SetInput(input);
-            filter->SetArrayNames(arrayNames);
-            if (!filter->Execute()) { showDarkFramelessMessage(title, QStringLiteral("数组过滤失败。")); return; }
-            refreshFilterResult(input, filter->GetOutput(), title);
-            dialog->close();
+            // 点数据与单元数据的勾选结果分别记录，同名属性不会互相牵连
+            filter->SetPointArrayNames(selectedPointNames);
+            filter->SetCellArrayNames(selectedCellNames);
+            if (!filter->Execute()) {
+                showDarkFramelessMessage(title, QStringLiteral("数组过滤失败：输入数据类型不受支持。"));
+                return;
+            }
+            auto output = filter->GetOutput();
+            if (!output) {
+                showDarkFramelessMessage(title, QStringLiteral("未得到输出数据。"));
+                return;
+            }
+            output->SetName(input->GetName() + "_filtered");
+            refreshFilterResult(input, output, title);
+            dlg->accept();
         });
+        connect(buttonBox, &QDialogButtonBox::rejected, dlg, &QDialog::reject);
+
+        dlg->show();
     });
+
 
     bindDevelopmentAction("deflect_normals", [=, this]() {
         const QString title = QStringLiteral("法向偏转");
@@ -6398,6 +6578,19 @@ void igQtMainWindow::initAllFilters() {
                 });
                 dialog->show();
             });
+
+    // ---------- 中值滤波 (Median)：追加在“开发中filter/第二批”菜单末尾 ----------
+    QAction* medianFilterAction = developingFiltersBatch2->addAction(QStringLiteral("中值滤波 (Median)"));
+    connect(medianFilterAction, &QAction::triggered, this, [this](bool) {
+        openLeftToolPanel(LeftToolPanelId::MedianFilter);
+        auto scene = iGame::SceneManager::Instance()->GetCurrentScene();
+        if (!scene) return;
+        auto CurrentModel = scene->GetCurrentModel();
+        if (!CurrentModel) return;
+        auto dataObject = CurrentModel->GetDataObject();
+        if (!dataObject) return;
+        ui->widget_MedianFilter->SetOriginDataObject(dataObject);
+    });
     // ---------- 三角面线性细分 (Subdivide)：追加在“开发中filter/第二批”菜单末尾 ----------
     QAction* subdivideAction = developingFiltersBatch2->addAction(QStringLiteral("三角面细分 (Subdivide)"));
     connect(subdivideAction, &QAction::triggered, this,
@@ -6521,6 +6714,266 @@ void igQtMainWindow::initAllFilters() {
                     dialog->close();
                 });
             });
+    // 9.28 布置的第二批 filter：按上游约定追加在「开发中filter/第二批」末尾。
+    // 这里只放代理入口，实际行为由「标准过滤器」里同 id 的 QAction 承担
+    // （见 igQtMainWindowStandardFilters.cpp 的 filterPanel 懒加载面板）。
+    static const DevelopmentEntry batch2Entries[] = {
+        {"texture_map_to_cylinder", "圆柱纹理坐标 (Texture Map To Cylinder)"},
+    };
+    for (const DevelopmentEntry& entry : batch2Entries) {
+        addDevelopmentAction(developingFiltersBatch2, approvedFilter(entry.id),
+                             QString::fromUtf8(entry.label));
+    }
+    // ---------- 表面切向量 (Generate Surface Tangents)：追加在“开发中filter/第二批”菜单末尾 ----------
+    QAction* generateSurfaceTangentsAction =
+            developingFiltersBatch2->addAction(QStringLiteral("表面切向量 (Generate Surface Tangents)"));
+    connect(generateSurfaceTangentsAction, &QAction::triggered, this, [this](bool checked) {
+        if (rendererWidget->GetScene()->GetCurrentModel() == nullptr) return;
+        auto model = rendererWidget->GetScene()->GetCurrentModel();
+        auto data = model->GetDataObject();
+        if (data == nullptr || data->GetPoints() == nullptr) {
+            showDarkFramelessMessage(QStringLiteral("Warning"),
+                                     QStringLiteral("当前模型没有点数据，无法计算表面切向量。"));
+            return;
+        }
+
+        // 先把模型里的纹理坐标点属性（IG_TCOORD，至少 2 个分量）列出来给用户选
+        auto attrs = data->GetAttributeSet();
+        std::vector<QString> texLabels;
+        std::vector<std::string> texNames;
+        if (attrs) {
+            for (IGsize i = 0; i < static_cast<IGsize>(attrs->GetNumberOfAttributes()); ++i) {
+                auto& attr = attrs->GetAttribute(i);
+                if (attr.isDeleted || !attr.pointer) continue;
+                if (attr.attachmentType != IG_POINT || attr.type != IG_TCOORD) continue;
+                if (attr.pointer->GetDimension() < 2) continue;
+                texNames.push_back(attr.pointer->GetName());
+                texLabels.push_back(QStringLiteral("%1（%2 个分量）")
+                                            .arg(QString::fromStdString(attr.pointer->GetName()))
+                                            .arg(attr.pointer->GetDimension()));
+            }
+        }
+        if (texLabels.empty()) {
+            showDarkFramelessMessage(
+                    QStringLiteral("Warning"),
+                    QStringLiteral("当前模型没有纹理坐标（IG_TCOORD 点属性），<br>"
+                                   "切向量必须由纹理坐标算出来。<br>"
+                                   "请先做一次「球面纹理坐标 (Texture Map To Sphere)」之类的 filter。"));
+            return;
+        }
+
+        igQtFilterDialogDockWidget* dialog = new igQtFilterDialogDockWidget(this, true);
+        dialog->setFilterTitle(QStringLiteral("表面切向量 (Generate Surface Tangents)"));
+        int texId =
+                dialog->addParameter(igQtFilterDialogDockWidget::QT_COMBO_BOX, QStringLiteral("纹理坐标"), texLabels);
+        int pointId = dialog->addParameter(igQtFilterDialogDockWidget::QT_CHECK_BOX,
+                                           QStringLiteral("输出点切向量 Tangents"), "true");
+        int cellId = dialog->addParameter(igQtFilterDialogDockWidget::QT_CHECK_BOX,
+                                          QStringLiteral("输出单元切向量（不归一化）"), "false");
+        int bitangentId = dialog->addParameter(igQtFilterDialogDockWidget::QT_CHECK_BOX,
+                                               QStringLiteral("输出副切向量 Bitangents"), "false");
+        dialog->setApplyFunctor([=, this]() {
+            bool okTex = false, okPoint = false, okCell = false, okBitangent = false;
+            const int texIndex = dialog->getComboIndex(texId, okTex);
+            const bool computePoint = dialog->getChecked(pointId, okPoint);
+            const bool computeCell = dialog->getChecked(cellId, okCell);
+            const bool computeBitangent = dialog->getChecked(bitangentId, okBitangent);
+            if (!okPoint || !okCell || !okBitangent) {
+                showDarkFramelessMessage(QStringLiteral("Warning"), QStringLiteral("参数读取失败"));
+                return;
+            }
+            if (!computePoint && !computeCell && !computeBitangent) {
+                showDarkFramelessMessage(QStringLiteral("Warning"), QStringLiteral("至少勾选一种切向量输出"));
+                return;
+            }
+
+            auto filter = iGame::GenerateSurfaceTangentsFilter::New();
+            if (okTex && texIndex >= 0 && texIndex < static_cast<int>(texNames.size())) {
+                filter->SetTextureCoordinatesArrayName(texNames[texIndex]);
+            }
+            filter->SetComputePointTangents(computePoint);
+            filter->SetComputeCellTangents(computeCell);
+            filter->SetComputeBitangents(computeBitangent);
+            filter->SetInput(0, data);
+            if (!filter->Execute()) {
+                showDarkFramelessMessage(QStringLiteral("Warning"),
+                                         QStringLiteral("表面切向量执行失败：<br>"
+                                                        "模型需要有纹理坐标，以及三角形 / 四边形 / 多边形单元"
+                                                        "（体网格请先「转换为表面网格」）。<br>"
+                                                        "细节见日志。"));
+                return;
+            }
+            auto outObj = filter->GetOutput(); // 独立输出，原模型不变
+            if (auto drawObject = iGame::DynamicCast<iGame::DrawObject>(outObj)) {
+                drawObject->ForceReConvertToDrawableData();
+            }
+            modelTreeWidget->addDataObjectToModelTree(outObj, Algorithm);
+            // 把新节点选成当前模型
+            if (auto item = modelTreeWidget->getItemFromObject(outObj)) { modelTreeWidget->setCurrentItem(item); }
+            rendererWidget->update();
+            showDarkFramelessMessage(
+                    QStringLiteral("表面切向量"),
+                    QStringLiteral("已生成点属性 Tangents（单位向量，方向沿纹理坐标 u 增大的方向）。<br>"), true);
+            dialog->close();
+        });
+        dialog->show();
+    });
+
+    // ===== GroupDatasets: 合并数据集（多选合组，对齐 ParaView Group Datasets）=====
+    // 注册到「新增filter/第二批」菜单末尾（与其它新增 filter 一致）。
+    QAction* groupDatasetsAction = developingFiltersBatch2->addAction(QStringLiteral("合并数据集 (Group Datasets)"));
+    connect(groupDatasetsAction, &QAction::triggered, this,
+            [this](bool) {
+                // 1) 读取模型树中当前选中的数据对象（支持多选，也支持多块装配体的子块）
+                auto inputs = modelTreeWidget->GetSelectedDataObjects();
+                if (inputs.empty()) {
+                    showDarkFramelessMessage(
+                            QStringLiteral("合并数据集"),
+                            QStringLiteral("请先在左侧模型树中选中对象。\n\n"
+                                           "• 多选：按住 Ctrl 或 Shift 点击\n"
+                                           "• 支持选中多块装配体的子块"));
+                    return;
+                }
+
+                // 2) 唯一命名。必须在注册进场景【之前】算，因为它扫描的是场景的模型列表。
+                const std::string groupName = UniqueGroupDatasetsName();
+
+                // 3) 执行组合（只做容器组合，不合并几何）
+                auto filter = iGame::GroupDatasetsFilter::New();
+                filter->SetInputs(inputs);
+                filter->SetOutputName(groupName);
+                if (!filter->Execute()) {
+                    showDarkFramelessMessage(QStringLiteral("合并数据集失败"),
+                                             QString::fromStdString(filter->GetMessage()));
+                    return;
+                }
+
+                auto group = filter->GetOutput(0);
+                if (!group) {
+                    showDarkFramelessMessage(QStringLiteral("合并数据集失败"),
+                                             QStringLiteral("未生成结果节点。"));
+                    return;
+                }
+
+                // 4) 挂到场景 + 模型树。
+                //    注意：addDataObjectToModelTree 内部已经调用 scene->AddModel()，
+                //    这里不要再单独 AddModel，否则会重复注册出冗余节点。
+                modelTreeWidget->addDataObjectToModelTree(group, ItemSource::Algorithm);
+
+                // 5) 【不隐藏原始输入】。
+                //
+                //    组的每个子块都是原模型的【深拷贝克隆】（几何 / 属性 / 显隐样式各持一份），
+                //    隐藏原模型不会影响组的内容，隐藏组内的块也不会影响原模型 —— 新旧完全独立。
+                //    因此原模型保持原状即可；这里仅刷新全树眼睛图标，让每处图标都反映
+                //    各自对象的真实显隐状态。
+                modelTreeWidget->RefreshModelTreeVisibilityIcons();
+
+                rendererWidget->update();
+
+                // 6) 汇报结果（子块按序号列出，重名也能区分）
+                QString blockList;
+                const auto& blockNames = filter->GetBlockNames();
+                for (size_t i = 0; i < blockNames.size(); ++i) {
+                    blockList += QStringLiteral("%1. %2\n")
+                                         .arg(static_cast<int>(i) + 1)
+                                         .arg(QString::fromStdString(blockNames[i]));
+                }
+                const QString report = QStringLiteral("已合并 %1 个对象 → %2\n%3")
+                                               .arg(filter->GetGroupedCount())
+                                               .arg(QString::fromStdString(groupName))
+                                               .arg(blockList);
+                showDarkFramelessMessage(QStringLiteral("合并数据集"), report, true);
+    // ---------- Perlin 噪声 (Perlin Noise)：追加在“新增filter/第二批”菜单末尾 ----------
+    connect(developingFiltersBatch2->addAction(QStringLiteral("Perlin 噪声 (Perlin Noise)")),
+            &QAction::triggered, this, [this](bool) {
+                auto scene = rendererWidget ? rendererWidget->GetScene() : nullptr;
+                auto currentModel = scene ? scene->GetCurrentModel() : nullptr;
+                if (!currentModel) {
+                    showDarkFramelessMessage(QStringLiteral("Perlin 噪声"), QStringLiteral("请先选择一个模型。"));
+                    return;
+                }
+                auto object = currentModel->GetDataObject();
+                if (object == nullptr || iGame::DynamicCast<iGame::PointSet>(object).IsNull()) {
+                    showDarkFramelessMessage(QStringLiteral("Perlin 噪声"),
+                                             QStringLiteral("当前对象不支持 Perlin 噪声（需要网格 / 点集）"));
+                    return;
+                }
+
+                auto* dialog = new igQtFilterDialogDockWidget(this, true);
+                dialog->setFilterTitle(QStringLiteral("Perlin 噪声"));
+                dialog->setFilterDescription(
+                        QStringLiteral("在每个输入点上采样 3D Perlin 噪声，输出新模型 + 点标量数组"));
+                const int ampId = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT,
+                                                       QStringLiteral("振幅 (Amplitude)"), "1");
+                const int fxId = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT,
+                                                      QStringLiteral("频率 X (Frequency X)"), "1");
+                const int fyId = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT,
+                                                      QStringLiteral("频率 Y (Frequency Y)"), "1");
+                const int fzId = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT,
+                                                      QStringLiteral("频率 Z (Frequency Z)"), "1");
+                const int pxId = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT,
+                                                      QStringLiteral("相位 X (Phase X)"), "0");
+                const int pyId = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT,
+                                                      QStringLiteral("相位 Y (Phase Y)"), "0");
+                const int pzId = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT,
+                                                      QStringLiteral("相位 Z (Phase Z)"), "0");
+                dialog->show();
+                dialog->setApplyFunctor([=, this]() {
+                    const int ids[7] = {ampId, fxId, fyId, fzId, pxId, pyId, pzId};
+                    const char* names[7] = {"振幅 (Amplitude)", "频率 X (Frequency X)",
+                                            "频率 Y (Frequency Y)", "频率 Z (Frequency Z)",
+                                            "相位 X (Phase X)", "相位 Y (Phase Y)",
+                                            "相位 Z (Phase Z)"};
+                    double values[7] = {0.0};
+                    bool ok = false;
+                    for (int i = 0; i < 7; ++i) {
+                        values[i] = dialog->getDouble(ids[i], ok);
+                        if (!ok) {
+                            showDarkFramelessMessage(
+                                    QStringLiteral("错误"),
+                                    QString::fromUtf8(names[i]) + QStringLiteral(" 不是有效数字。"));
+                            return;
+                        }
+                    }
+
+                    auto filter = PerlinNoiseFilter::New();
+                    filter->SetAmplitude(values[0]);
+                    filter->SetFrequency(values[1], values[2], values[3]);
+                    filter->SetPhase(values[4], values[5], values[6]);
+                    filter->SetInput(object);
+                    if (filter->Execute()) {
+                        modelTreeWidget->addDataObjectToModelTree(filter->GetOutput(), ItemSource::Algorithm);
+                        modelTreeWidget->updateCloudPicture();
+                        rendererWidget->update();
+                        dialog->close();
+                    } else {
+                        showDarkFramelessMessage(QStringLiteral("错误"),
+                                                 QStringLiteral("Perlin 噪声生成失败（需要网格 / 点集）"));
+                    }
+                });
+            });
+
+    QAction* textureMapToPlaneAction = developingFiltersBatch2->addAction(
+            QStringLiteral("生成平面纹理坐标 (Texture Map to Plane)"));
+    textureMapToPlaneAction->setObjectName(QStringLiteral("action_developing_texture_map_to_plane"));
+    connect(textureMapToPlaneAction, &QAction::triggered, this, [this]() {
+        auto model = rendererWidget->GetScene()->GetCurrentModel();
+        if (!model) {
+            showDarkFramelessMessage(QStringLiteral("生成平面纹理坐标"),
+                                     QStringLiteral("请先在模型树中选择一个包含点数据的网格模型。"));
+            return;
+        }
+        auto* panel = new igQtTextureMapToPlaneWidget(rendererWidget, modelTreeWidget, model, this);
+        if (!panel->isReady()) {
+            showDarkFramelessMessage(QStringLiteral("生成平面纹理坐标"),
+                                     QStringLiteral("当前模型不属于 PointSet 网格体系，或模型中没有点；操作已取消。"));
+            panel->deleteLater();
+            return;
+        }
+        panel->show();
+        panel->raise();
+        panel->activateWindow();
+    });
 
     QAction* smoothAction = developingFiltersBatch2->addAction(QStringLiteral("表面平滑 (Smooth)"));
     smoothAction->setObjectName(QStringLiteral("action_Smooth"));
@@ -6990,6 +7443,7 @@ void igQtMainWindow::initAllDockWidgetConnectWithAction() {
         if (!dataObject) return;
         ui->widget_ContourExtract->SetOriginDataObject(dataObject);
     });
+
     connect(ui->action_GenerateChart, &QAction::triggered, this, [&](bool checked) {
         auto scene = iGame::SceneManager::Instance()->GetCurrentScene();
         if (!scene) return;
@@ -7281,6 +7735,8 @@ QDockWidget* igQtMainWindow::shellDockForLeftPanel(LeftToolPanelId id) const {
     case LeftToolPanelId::Selection: return ui->dockWidget_SelectionField;
     case LeftToolPanelId::VariableDensity: return ui->dockWidget_VariableDensityField;
     case LeftToolPanelId::DataChange: return ui->dockWidget_DataChangeField;
+    case LeftToolPanelId::MedianFilter: return ui->dockWidget_MedianFilter;
+    case LeftToolPanelId::ResampleToImage: return m_resampleToImageDock;
     case LeftToolPanelId::Count: return nullptr;
     }
     return nullptr;
@@ -7384,6 +7840,12 @@ void igQtMainWindow::openLeftToolPanel(LeftToolPanelId id) {
     case LeftToolPanelId::DataChange:
         relocateContentToLeftTab(ui->dockWidget_DataChangeField, ui->widget_DataChangeField, QStringLiteral("路径图"), id,
                                  false);
+        break;
+    case LeftToolPanelId::MedianFilter:
+        relocateContentToLeftTab(ui->dockWidget_MedianFilter, ui->widget_MedianFilter, QStringLiteral("中值滤波"), id, false);
+        break;
+    case LeftToolPanelId::ResampleToImage:
+        relocateContentToLeftTab(m_resampleToImageDock, m_resampleToImageWidget, QStringLiteral("重采样到图像"), id, false);
         break;
     case LeftToolPanelId::Count:
         break;
@@ -7599,8 +8061,20 @@ void igQtMainWindow::initAllMySignalConnections() {
 
 
     /* Model Tree signal connect BEGIN.*/
-    connect(this->modelTreeWidget, &igQtModelDialogWidget::CloudPictureChanged, ui->widget_ScalarField,
-            &igQtScalarViewWidget::showScalarView);
+    // 色条按"选中优先"的数据对象工作：把模型树当前选中对象（多块组内为子块）推给
+    // 色条控件后再刷新 —— 此前固定读当前模型根对象，组根未着色（属性下标 -1）
+    // 会导致色条不更新（停留/回落默认范围）。
+    connect(this->modelTreeWidget, &igQtModelDialogWidget::CloudPictureChanged, this, [this]() {
+        auto currentObj = this->modelTreeWidget->GetCurrentDataObject();
+        ui->widget_ScalarField->setCurrentDataObject(currentObj);
+        ui->widget_ScalarField->showScalarView();
+        // 左侧色条图例是场景上的覆盖 widget（igQtColorBarWidget），它独立读 scene 的
+        // 当前模型根对象 —— 同样必须改成"选中优先"，否则子块着色时它仍显示 0-255。
+        if (this->rendererWidget && this->rendererWidget->getColorBarWidget()) {
+            this->rendererWidget->getColorBarWidget()->setCurrentDataObject(currentObj);
+            this->rendererWidget->getColorBarWidget()->update();
+        }
+    });
     // Update Deformation Info when model is deleted
     connect(this->modelTreeWidget, &igQtModelDialogWidget::ModelDeleted,
             DeformationWidget, &igQtDeformationWidget::updateInfo);
@@ -7640,7 +8114,10 @@ void igQtMainWindow::initAllMySignalConnections() {
 
     connect(ui->widget_ScalarField, &igQtScalarViewWidget::ChangeShowColorManager, this, [&]() {
         if (this->ColorManagerWidget->isHidden()) {
-            // 打开前从当前模型 ColorMapper 同步色条（无模型会提示）
+            // 打开前先按"选中优先"把目标对象推给色条编辑器（多块组内选中子块时为子块），
+            // 再同步色条（无模型会提示）—— 否则色条编辑会绑到组根 mapper 上，
+            // 编辑结果写不回子块。
+            this->ColorManagerWidget->setCurrentDataObject(this->modelTreeWidget->GetCurrentDataObject());
             this->ColorManagerWidget->resetColorRange();
             this->ColorManagerWidget->show();
             this->ColorManagerWidget->raise();
@@ -7680,6 +8157,15 @@ void igQtMainWindow::initAllMySignalConnections() {
                 modelTreeWidget->addDataObjectToModelTree(res, ItemSource::Algorithm);
             });
     connect(ui->widget_ContourExtract, &igQtContourExtractWidget::UpdateContourModel, this,
+            [&](DataObject::Pointer mesh) {
+                modelTreeWidget->updateCurrentModelInfo();
+                rendererWidget->update();
+            });
+    connect(ui->widget_MedianFilter, &igQtMedianFilterWidget::DrawMedianModel, this,
+            [&](iGame::DataObject::Pointer res) {
+                modelTreeWidget->addDataObjectToModelTree(res, ItemSource::Algorithm);
+            });
+    connect(ui->widget_MedianFilter, &igQtMedianFilterWidget::UpdateMedianModel, this,
             [&](DataObject::Pointer mesh) {
                 modelTreeWidget->updateCurrentModelInfo();
                 rendererWidget->update();
@@ -8033,9 +8519,9 @@ void igQtMainWindow::initAllInteractor() {
     });
     //######### View Cloud Change ST #########
     connect(this->modelTreeWidget, &igQtModelDialogWidget::CloudPictureChanged, this, [&]() {
-        auto model = rendererWidget->GetScene()->GetCurrentModel();
-        if (model == nullptr) return;
-        auto dataObj = model->GetDataObject();
+        // 变量选择器按"选中优先"取对象：多块组内选中子块时，变量列表/当前变量
+        // 应基于子块（此前读当前模型根对象，组根属性下标为 -1 会直接早退、不更新）。
+        auto dataObj = this->modelTreeWidget->GetCurrentDataObject();
         if (dataObj == nullptr) return;
         auto attrSet = dataObj->GetAttributeSet();
         if (attrSet == nullptr) return;
