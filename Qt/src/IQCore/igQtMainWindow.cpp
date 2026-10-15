@@ -1952,11 +1952,13 @@ void igQtMainWindow::initAllFilters() {
         {"process_ids", "进程标识符", StandardFilterCategory::DataAttributes, false},
         {"random_attributes", "随机属性", StandardFilterCategory::DataAttributes, false},
         {"random_vectors", "随机向量", StandardFilterCategory::DataAttributes, false},
+        {"rename_arrays", "重命名数组", StandardFilterCategory::DataAttributes, false},
         {"reflect", "反射", StandardFilterCategory::Transform, false},
         {"remove_ghost_information", "移除幽灵信息", StandardFilterCategory::DataAttributes, false},
         {"rename_arrays", "重命名数组", StandardFilterCategory::DataAttributes, false},
         {"resample_to_image", "重采样到图像", StandardFilterCategory::Sampling, true},
         {"resample_to_line", "重采样到直线", StandardFilterCategory::Sampling, false},
+        {"resample_with_dataset", "重采样至数据集", StandardFilterCategory::Sampling, false},
         {"resample_with_dataset", "使用数据集重采样", StandardFilterCategory::Sampling, false},
         {"reverse_sense", "反转方向", StandardFilterCategory::Geometry, false},
         {"ribbon", "带状面", StandardFilterCategory::Geometry, false},
@@ -5192,6 +5194,8 @@ void igQtMainWindow::initAllFilters() {
         {"point_volume_interpolator", "点体积插值 (Point Volume Interpolator)"},
         {"angular_periodic", "角度周期复制 (Angular Periodic)"},
         {"resample_to_line", "重采样至直线(ResampleToLine)"},
+        {"resample_with_dataset", "重采样至数据集 (Resample With DataSet)"},
+        {"rename_arrays", "重命名数组 (Rename Arrays)"},
         {"point_set_to_octree_image", "点集转八叉树图像 (PointSetToOctree)"},
         {"resample_to_image", "重采样到图像 (ResampleToImage)"},
         {"random_attributes", "随机属性生成 (Random Attributes)"},
@@ -5205,6 +5209,18 @@ void igQtMainWindow::initAllFilters() {
                              QString::fromUtf8(entry.label));
         if (!developingFilters->actions().isEmpty()) {
             developingFilters->actions().last()->setData(QString::fromLatin1(entry.id));
+        }
+    }
+
+    static const DevelopmentEntry directEntries_2[] = {
+        {"resample_with_dataset", "重采样至数据集 (Resample With DataSet)"},
+        {"rename_arrays", "重命名数组 (Rename Arrays)"},
+    };
+    for (const DevelopmentEntry& entry : directEntries_2) {
+        addDevelopmentAction(developingFiltersBatch2, approvedFilter(entry.id),
+            QString::fromUtf8(entry.label));
+        if (!developingFiltersBatch2->actions().isEmpty()) {
+            developingFiltersBatch2->actions().last()->setData(QString::fromLatin1(entry.id));
         }
     }
 
