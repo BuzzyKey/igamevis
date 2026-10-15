@@ -11,6 +11,7 @@
 #include "MaskPoints/iGameMaskPointsFilter.h"
 #include "MeshCodec/iGameMeshDecoderFilter.h"
 #include "MeshCodec/iGameMeshEncoderFilter.h"
+#include "Median/iGameMedianFilter.h"
 #include "ModelSurface/iGameModelGeometryFilter.h"
 #include "CellCenter/iGameCellCenterFilter.h"
 #include "ParallelCoordinates/iGameGenerateParallelCoordinatesData.h"
@@ -53,6 +54,7 @@
 
 #include "Animation/iGameAttrDiff.h"
 #include "AttributeManipulation/iGameRandomVectorsFilter.h"
+#include "AttributeManipulation/iGamePerlinNoiseFilter.h"
 
 #include "AppendReduce/iGameAppendReduceFilter.h"
 #include "AppendArcLength/iGameAppendArcLengthFilter.h"

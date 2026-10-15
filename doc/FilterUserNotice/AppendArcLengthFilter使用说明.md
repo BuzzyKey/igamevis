@@ -242,7 +242,7 @@ legacy `.vtk` `POLYDATA` 的 `LINES` 段由 `VTKAbstractReader::CreateCellArray(
 
 顶点数一致的段（例如全部 2 点线、全部 4 点四边形）本来就正确，所以该缺陷此前未被发现。
 
-## 2026-10-14 回归修复（待提交）
+## 2026-10-14 回归修复（d6fdeb20）
 
 用户反馈 `arc_length_lines.vtk` 在 ParaView 中统计有 12 个点，但点表示只看见 8 个位置。
 文件的 4 条折线引用 9 个点 ID（0/1/2/3/4/5/6/10/11），其中点 0 与点 3 坐标重合；
@@ -263,7 +263,7 @@ legacy `.vtk` `POLYDATA` 的 `LINES` 段由 `VTKAbstractReader::CreateCellArray(
 确认 8 个可见位置；运行追加弧长，确认新 `PolylineLengthN` 模型、原模型不增加新属性、
 结果的 `arc_length` 为点标量、12 项、范围约 `[0, 9.48683262]`。
 
-## 2026-10-15 混合 Surface 显示修复（待提交）
+## 2026-10-15 混合 Surface 显示修复（d6fdeb20）
 
 `arc_length_lines_and_polygons.vtk` 同时包含折线和三角形。此前 Surface 只绘制三角形，
 Surface+Wireframe 又进入三角形单通道线框路径，导致独立折线不显示。

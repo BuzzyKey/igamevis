@@ -61,6 +61,7 @@ class igQtAxisAlignedReflectionWidget;
 class igQtPointAndCellIdsWidget;
 class igQtExtractComponentWidget;
 class igQtLinearExtrusionWidget;
+class igQtMedianFilterWidget;
 class QDialog;
 class igQtHistogramChartWidget;
 
@@ -82,6 +83,8 @@ public:
         Selection,
         VariableDensity,
         DataChange,
+        MedianFilter,
+        ResampleToImage,
         Count
     };
 
@@ -223,7 +226,11 @@ private:
     iGame::AxisAlignedReflectionFilter::Pointer m_axisAlignedReflectionFilter;
     iGame::Model::Pointer m_axisAlignedReflectionModel;
     int m_axisAlignedReflectionCount{0};
-    std::array<int, static_cast<size_t>(LeftToolPanelId::Count)> m_leftToolTabByPanel{{-1, -1, -1, -1, -1, -1, -1, -1, -1, -1}};
+    QDockWidget* m_resampleToImageDock = nullptr;
+    igQtResampleToImageWidget* m_resampleToImageWidget = nullptr;
+    // 每类左侧工具面板占一个槽位，初始均未打开。
+    std::array<int, static_cast<size_t>(LeftToolPanelId::Count)> m_leftToolTabByPanel{
+        {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1}};
 
     void relocateContentToLeftTab(QDockWidget* shell, QWidget* inner, const QString& title, LeftToolPanelId id,
                                   bool centerFlowField);

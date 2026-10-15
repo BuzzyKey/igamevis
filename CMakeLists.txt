@@ -272,4 +272,17 @@ if (IGAME_BUILD_FILTER_CHECKS)
                         "$<TARGET_FILE_DIR:${_filterCheck}>/Models"
                 COMMENT "Copying filter check models next to ${_filterCheck}")
     endforeach ()
+    add_executable(testResampleOctreeChecks Examples/Filter/Convert/TestResampleOctreeChecks.cpp)
+    target_link_libraries(testResampleOctreeChecks PRIVATE iGameCore)
+
+    add_executable(testResamplePolyhedronChecks Examples/Filter/Convert/TestResamplePolyhedronChecks.cpp)
+    target_link_libraries(testResamplePolyhedronChecks PRIVATE iGameCore)
+
+    add_executable(testCGNSResample Examples/Filter/Convert/TestCGNSResample.cpp)
+    target_link_libraries(testCGNSResample PRIVATE iGameCore)
+
+    if (ENABLE_QT_MODULE)
+        add_executable(testResampleUI Examples/Filter/Convert/TestResampleUI.cpp)
+        target_link_libraries(testResampleUI PRIVATE Qt_module)
+    endif ()
 endif ()

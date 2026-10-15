@@ -138,7 +138,7 @@ bool SameValues(ArrayObject::Pointer array, const std::vector<double>& want) {
     return true;
 }
 
-// BUG (2026-10-14, 修复待提交): arc_length_lines.vtk 的点数显示与 ParaView 不一致，
+// BUG (2026-10-14, 修复提交 d6fdeb20): arc_length_lines.vtk 的点数显示与 ParaView 不一致，
 // 且过滤器原地修改输入，模型树没有新结果。保留重复坐标和孤立点，按原 point id
 // 验证全部 12 个点及共享端点的值；输出必须独立，原模型和已有属性不能改变。
 void CheckLinesOnlyRegression(const std::string& modelPath) {
@@ -278,7 +278,7 @@ LINES 4 15
 
 } // namespace
 
-// BUG (2026-10-15, 修复待提交): LINES + POLYGONS 在 Surface 中只显示三角形；
+// BUG (2026-10-15, 修复提交 d6fdeb20): LINES + POLYGONS 在 Surface 中只显示三角形；
 // Surface+Wireframe 的单通道三角形边绘制也丢失独立折线。验证实际混合模型的绘制策略、
 // CPU 三角形/折线索引、表示切换以及过滤器输出；不创建 OpenGL 上下文，画面由用户验证。
 void CheckMixedSurfaceRegression(const std::string& modelPath) {
