@@ -64,6 +64,13 @@ public:
     static double ComputeTriangleAspectRatio(const std::vector<iGame::Point>& points);
     static double ComputeTriangleEdgeRatio(const std::vector<iGame::Point>& points);
     static double ComputeTriangleMeshQuality(const std::vector<iGame::Point>& points);
+    // 三角形（对齐 ParaView Cell Quality 新增）
+    static double ComputeTriangleCondition(const std::vector<iGame::Point>& points);
+    static double ComputeTriangleDistortion(const std::vector<iGame::Point>& points);
+    static double ComputeTriangleEquiangleSkew(const std::vector<iGame::Point>& points);
+    static double ComputeTriangleRadiusRatio(const std::vector<iGame::Point>& points);
+    static double ComputeTriangleScaledJacobian(const std::vector<iGame::Point>& points);
+    static double ComputeTriangleShape(const std::vector<iGame::Point>& points);
 
     //四边形
     static double ComputeQuadArea(const std::vector<iGame::Point>& points);
@@ -76,6 +83,26 @@ public:
     static double ComputeQuadTaper(const std::vector<iGame::Point>& points);
     static double ComputeQuadSkew(const std::vector<iGame::Point>& points);
     static double ComputeQuadStretch(const std::vector<iGame::Point>& points);
+    // 四边形（对齐 ParaView Cell Quality 新增）
+    static double ComputeQuadCondition(const std::vector<iGame::Point>& points);
+    static double ComputeQuadDistortion(const std::vector<iGame::Point>& points);
+    static double ComputeQuadEquiangleSkew(const std::vector<iGame::Point>& points);
+    static double ComputeQuadOddy(const std::vector<iGame::Point>& points);
+    static double ComputeQuadRadiusRatio(const std::vector<iGame::Point>& points);
+    static double ComputeQuadScaledJacobian(const std::vector<iGame::Point>& points);
+    static double ComputeQuadShape(const std::vector<iGame::Point>& points);
+    static double ComputeQuadShear(const std::vector<iGame::Point>& points);
+    // —— 需要「网格平均面积」的指标（对齐 ParaView 同名项）——
+    static double ComputeQuadRelativeSizeSquared(const std::vector<iGame::Point>& points,
+                                                 double averageArea);
+    static double ComputeQuadShapeAndSize(const std::vector<iGame::Point>& points,
+                                          double averageArea);
+    static double ComputeQuadShearAndSize(const std::vector<iGame::Point>& points,
+                                          double averageArea);
+    static double ComputeTriangleRelativeSizeSquared(const std::vector<iGame::Point>& points,
+                                                     double averageArea);
+    static double ComputeTriangleShapeAndSize(const std::vector<iGame::Point>& points,
+                                              double averageArea);
 
     static double ComputeFaceMinAngleQuality(const std::vector<iGame::Point>& points);
     static double ComputeSurfaceVolume(const std::vector<iGame::Point>& points);

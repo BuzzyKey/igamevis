@@ -4516,26 +4516,54 @@ void igQtMainWindow::initAllFilters() {
         dialog->setFilterDescription(
                 QStringLiteral("对齐 ParaView Cell Quality：选择一个统一指标作用于模型内所有单元；\n"
                                "不适用的单元填入「不支持值」，执行后汇总报告跳过数量。\n"
-                               "适用范围：四面体、六面体单元；三角形、四边形等面单元会被跳过。"));
+                               "适用范围：四面体、六面体、三角形、四边形；\n"
+                               "各指标对单元类型的适用性按 ParaView Cell Quality 对齐。"));
 
         // 2. 统一指标下拉框（与 ParaView 一致的交互，不再区分四面体/六面体专用算法）
+        //    20 项按 ParaView Cell Quality 的 Quality Measure 列表原样排列
         std::vector<QString> metricNames = {
-                QStringLiteral("边长比 (Edge Ratio)"),
+                QStringLiteral("面积 (Area)"),
                 QStringLiteral("纵横比 (Aspect Ratio)"),
+                QStringLiteral("条件数 (Condition)"),
+                QStringLiteral("畸变度 (Distortion)"),
+                QStringLiteral("边长比 (Edge Ratio)"),
+                QStringLiteral("等角歪斜 (Equiangle Skew)"),
                 QStringLiteral("雅可比行列式 (Jacobian)"),
-                QStringLiteral("歪斜度 (Skew)"),
                 QStringLiteral("最小内角 (Minimum Angle)"),
+                QStringLiteral("Oddy"),
+                QStringLiteral("半径比 (Radius Ratio)"),
+                QStringLiteral("相对尺寸平方 (Relative Size Squared)"),
+                QStringLiteral("归一化雅可比 (Scaled Jacobian)"),
+                QStringLiteral("形状 (Shape)"),
+                QStringLiteral("形状与尺寸 (Shape and Size)"),
+                QStringLiteral("剪切 (Shear)"),
+                QStringLiteral("剪切与尺寸 (Shear and Size)"),
+                QStringLiteral("歪斜度 (Skew)"),
+                QStringLiteral("伸展度 (Stretch)"),
                 QStringLiteral("锥度 (Taper)"),
-                QStringLiteral("伸展度 (Stretch)")};
+                QStringLiteral("翘曲度 (Warpage)")};
 
         std::vector<iGame::CellMeshMetricsFilter::CellQualityMetric> metricEnums = {
-                iGame::CellMeshMetricsFilter::QUALITY_EDGE_RATIO,
+                iGame::CellMeshMetricsFilter::QUALITY_AREA,
                 iGame::CellMeshMetricsFilter::QUALITY_ASPECT_RATIO,
+                iGame::CellMeshMetricsFilter::QUALITY_CONDITION,
+                iGame::CellMeshMetricsFilter::QUALITY_DISTORTION,
+                iGame::CellMeshMetricsFilter::QUALITY_EDGE_RATIO,
+                iGame::CellMeshMetricsFilter::QUALITY_EQUIANGLE_SKEW,
                 iGame::CellMeshMetricsFilter::QUALITY_JACOBIAN,
-                iGame::CellMeshMetricsFilter::QUALITY_SKEW,
                 iGame::CellMeshMetricsFilter::QUALITY_MIN_ANGLE,
+                iGame::CellMeshMetricsFilter::QUALITY_ODDY,
+                iGame::CellMeshMetricsFilter::QUALITY_RADIUS_RATIO,
+                iGame::CellMeshMetricsFilter::QUALITY_RELATIVE_SIZE_SQUARED,
+                iGame::CellMeshMetricsFilter::QUALITY_SCALED_JACOBIAN,
+                iGame::CellMeshMetricsFilter::QUALITY_SHAPE,
+                iGame::CellMeshMetricsFilter::QUALITY_SHAPE_AND_SIZE,
+                iGame::CellMeshMetricsFilter::QUALITY_SHEAR,
+                iGame::CellMeshMetricsFilter::QUALITY_SHEAR_AND_SIZE,
+                iGame::CellMeshMetricsFilter::QUALITY_SKEW,
+                iGame::CellMeshMetricsFilter::QUALITY_STRETCH,
                 iGame::CellMeshMetricsFilter::QUALITY_TAPER,
-                iGame::CellMeshMetricsFilter::QUALITY_STRETCH};
+                iGame::CellMeshMetricsFilter::QUALITY_WARPAGE};
 
         int comboID =
                 dialog->addParameter(igQtFilterDialogDockWidget::QT_COMBO_BOX, QStringLiteral("评估指标"), metricNames);
@@ -4626,8 +4654,9 @@ void igQtMainWindow::initAllFilters() {
                                      .arg(QString::fromStdString(qualityObj->GetName()));
             if (supported == 0 && unsupported > 0) {
                 report += QStringLiteral(
-                        "\n\n提示：当前指标对模型中的所有单元均不适用。"
-                        "本功能仅支持四面体 / 六面体单元，请确认模型为体网格，或更换评估指标。");
+                        "\n\n提示：当前指标对该模型中的所有单元均不适用。\n"
+                        "请确认单元类型（四面体/六面体/三角形/四边形），或更换评估指标 ——\n"
+                        "不同指标对单元类型的适用范围与 ParaView Cell Quality 一致。");
             }
             showDarkFramelessMessage(QStringLiteral("评估完成"), report, true);
         });

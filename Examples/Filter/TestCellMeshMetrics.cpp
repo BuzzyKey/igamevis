@@ -1,27 +1,41 @@
 // ===========================================================================
 // Cell Quality 批量导出 / 与 ParaView 基准逐值对比
 // ---------------------------------------------------------------------------
-// 【背景 BUG】CellMeshMetricsFilter 最初只处理四面体与六面体，遇到三角形 /
-//   四边形单元时不做任何分支，导致全部单元落到「不支持值」：
+// 【背景 BUG（第一轮）】CellMeshMetricsFilter 最初只处理四面体与六面体，
+//   遇到三角形 / 四边形单元时不做任何分支，导致全部单元落到「不支持值」：
 //     - 现象：对 Convert_Quad_Bicycle.vtk（65896 四边形 + 30772 三角形）执行
 //             Edge Ratio，报告「成功 0 / 跳过 96668」，而 ParaView 同一文件
 //             能正常算出 [1.0000979, 483.93376]。
 //     - 触发条件：模型含面单元（三角形或四边形），任一指标。
-//     - 影响：Cell Quality 与 ParaView 结果不可比，用户无法判断是模型不适用
-//             还是功能缺失。
+//
+// 【背景 BUG（第二轮）】指标数量与数值双重不符：
+//     1) 下拉框只有 7 个指标，ParaView Cell Quality 有 20 个；
+//     2) 已实现的 7 个里，hex EdgeRatio / tet AspectRatio / tet Jacobian /
+//        quad Jacobian / quad Warpage 等 12 处公式与 Verdict 不一致，
+//        实测偏差可达 6.26%（hex EdgeRatio）甚至符号相反（quad Warpage 的
+//        平面单元应为 0，旧实现给 1）。
+//     3) 退化单元（体积 < 1e-9 的薄片四面体）上，旧实现在法向模长为 0 时
+//        提前 return 0，而 Verdict 会返回 179.9999991。
 //
 // 【本测试要保证的正确行为】
-//   1. 对三角形单元至少支持 Edge Ratio / Aspect Ratio / Minimum Angle；
-//      其余 4 个指标（Jacobian / Skew / Taper / Stretch）应填「不支持值」。
-//   2. 对四边形单元支持 7 个指标中的 6 个（Stretch 待实现），
-//      且 成功数 + 跳过数 == 模型总单元数。
-//   3. 每个指标的数值应与 ParaView 6.1.1 的 vtkCellQuality 逐单元一致。
+//   1. 覆盖 ParaView Cell Quality 的全部 20 个指标，逐单元与 vtkCellQuality
+//      在 rel<=1e-4 内一致（含「不支持值」的类别也要一致）。
+//   2. 每种单元类型按其适用矩阵分发；不适用时填「不支持值」。
+//      - 三角形 10 项、四边形 17 项、四面体 12 项、六面体 17 项
+//        （Relative Size Squared / Shape and Size / Shear and Size 需要
+//         全网格平均尺寸，按类型各算一份）。
+//   3. 成功数 + 跳过数 == 模型总单元数。
 //
 // 【重要边界用例及原因】
-//   - 混合网格（四边形 + 三角形）必须逐类型分发：同一指标在不同类型上的
-//     支持性不同，若只按「第一个单元的类型」推断会给错结果。
+//   - 混合网格（四边形 + 三角形 + 四面体 + 六面体）必须逐类型分发：同一指标
+//     在不同类型上的适用性不同，若只按「第一个单元的类型」推断会给错结果。
+//     holdout_mixed.vtk 专门覆盖这一点。
 //   - 「不支持值」使用 -1.0（对齐 ParaView 的 Undefined Quality 默认值），
 //     统计范围时必须排除，否则会污染 min/max。
+//   - 退化薄片四面体（|det|/6 < 1e-9）：面法向近共线，acos 输入落在 ±1
+//     边界，第 11 位小数差异就会让结果在 0° 与 180° 之间翻转（连 Verdict
+//     自身扰动 1e-13 都会改变答案）。compare_cellquality.py 的 --degenerate
+//     参数把这些单元单列，不计入不一致。
 //
 // 【修复提交】待提交。测试与修复同次首次提交，提交后用
 //   git log --diff-filter=A --format="%h %s" -- Examples/Filter/TestCellMeshMetrics.cpp
@@ -29,7 +43,7 @@
 //
 // 【用法】testCellMeshMetrics [<模型路径>] [<输出目录>]
 //   默认模型 = Convert_Quad_Bicycle.vtk，默认输出 = ./cellquality-out
-//   对 7 个统一指标逐个评估并导出逐单元 CSV；CSV 格式与 ParaView 导出的
+//   对 20 个统一指标逐个评估并导出逐单元 CSV；CSV 格式与 ParaView 导出的
 //   基准完全一致，可直接交给 compare_cellquality.py 做逐值比对。
 // ===========================================================================
 
@@ -79,13 +93,27 @@ struct MetricCase {
 };
 
 const std::vector<MetricCase> kMetricCases = {
-        {"边长比 (Edge Ratio)", "Edge Ratio", CellQualityMetric::QUALITY_EDGE_RATIO},
+        {"面积 (Area)", "Area", CellQualityMetric::QUALITY_AREA},
         {"纵横比 (Aspect Ratio)", "Aspect Ratio", CellQualityMetric::QUALITY_ASPECT_RATIO},
+        {"条件数 (Condition)", "Condition", CellQualityMetric::QUALITY_CONDITION},
+        {"畸变度 (Distortion)", "Distortion", CellQualityMetric::QUALITY_DISTORTION},
+        {"边长比 (Edge Ratio)", "Edge Ratio", CellQualityMetric::QUALITY_EDGE_RATIO},
+        {"等角歪斜 (Equiangle Skew)", "Equiangle Skew", CellQualityMetric::QUALITY_EQUIANGLE_SKEW},
         {"雅可比行列式 (Jacobian)", "Jacobian", CellQualityMetric::QUALITY_JACOBIAN},
-        {"歪斜度 (Skew)", "Skew", CellQualityMetric::QUALITY_SKEW},
         {"最小内角 (Minimum Angle)", "Minimum Angle", CellQualityMetric::QUALITY_MIN_ANGLE},
-        {"锥度 (Taper)", "Taper", CellQualityMetric::QUALITY_TAPER},
+        {"Oddy", "Oddy", CellQualityMetric::QUALITY_ODDY},
+        {"半径比 (Radius Ratio)", "Radius Ratio", CellQualityMetric::QUALITY_RADIUS_RATIO},
+        {"归一化雅可比 (Scaled Jacobian)", "Scaled Jacobian", CellQualityMetric::QUALITY_SCALED_JACOBIAN},
+        {"形状 (Shape)", "Shape", CellQualityMetric::QUALITY_SHAPE},
+        {"剪切 (Shear)", "Shear", CellQualityMetric::QUALITY_SHEAR},
+        {"歪斜度 (Skew)", "Skew", CellQualityMetric::QUALITY_SKEW},
         {"伸展度 (Stretch)", "Stretch", CellQualityMetric::QUALITY_STRETCH},
+        {"锥度 (Taper)", "Taper", CellQualityMetric::QUALITY_TAPER},
+        {"翘曲度 (Warpage)", "Warpage", CellQualityMetric::QUALITY_WARPAGE},
+        // 以下 3 项需要网格平均单元体积作为额外输入（filter 内部预扫描求得）
+        {"相对尺寸平方 (Relative Size Squared)", "Relative Size Squared", CellQualityMetric::QUALITY_RELATIVE_SIZE_SQUARED},
+        {"形状与尺寸 (Shape and Size)", "Shape and Size", CellQualityMetric::QUALITY_SHAPE_AND_SIZE},
+        {"剪切与尺寸 (Shear and Size)", "Shear and Size", CellQualityMetric::QUALITY_SHEAR_AND_SIZE},
 };
 
 // 递归收集叶子节点的 CellQuality 数组（按遍历顺序拼接）

@@ -84,15 +84,23 @@ def collect(dirpath):
     return found
 
 
-def compare(ref, got, unsupported=-1.0, tol=1e-4):
-    """对比两组数值，返回统计字典。"""
+def compare(ref, got, unsupported=-1.0, tol=1e-4, degenerate=None):
+    """对比两组数值，返回统计字典。
+
+    degenerate: 可选的退化单元下标集合。这些单元（例如体积比中位数小 8 个数量级的
+    薄片四面体）内部面法向几乎共线，acos 的输入落在 ±1 边界上，第 11 位小数的差异
+    就会让结果在 0° 与 180° 之间翻转 —— 连 Verdict 自身扰动 1e-13 都会改变答案。
+    这类单元单独统计，不计入 numeric_bad。
+    """
     n = min(len(ref), len(got))
     if n == 0:
         return None
+    degenerate = degenerate or set()
     same_unsupported = 0
     mismatch_kind = 0      # 一边 -1 一边有值
     numeric_ok = 0
     numeric_bad = 0
+    degen_bad = 0
     max_abs = 0.0
     max_rel = 0.0
     worst = []
@@ -116,6 +124,8 @@ def compare(ref, got, unsupported=-1.0, tol=1e-4):
             max_rel = reld
         if reld <= tol or absd <= tol:
             numeric_ok += 1
+        elif i in degenerate:
+            degen_bad += 1
         else:
             numeric_bad += 1
             if len(worst) < 8:
@@ -128,6 +138,7 @@ def compare(ref, got, unsupported=-1.0, tol=1e-4):
         "mismatch_kind": mismatch_kind,
         "numeric_ok": numeric_ok,
         "numeric_bad": numeric_bad,
+        "degen_bad": degen_bad,
         "max_abs": max_abs,
         "max_rel": max_rel,
         "worst": worst,
@@ -140,7 +151,23 @@ def main():
     ap.add_argument("gotdir", help="iGameVis 导出目录")
     ap.add_argument("--tol", type=float, default=1e-4, help="相对误差容差（默认 1e-4）")
     ap.add_argument("--unsupported", type=float, default=-1.0, help="不支持值（默认 -1）")
+    ap.add_argument("--degenerate", default=None,
+                    help="退化单元清单 CSV（列: model,cell_index）。这些单元的不一致"
+                         "单独统计，不计入 FAIL。用 --write-degenerate 生成默认清单，"
+                         "或把本参数留空以严格模式运行。")
     args = ap.parse_args()
+
+    degen = {}
+    if args.degenerate and os.path.isfile(args.degenerate):
+        with open(args.degenerate, "r", encoding="utf-8", errors="replace") as f:
+            for raw in f:
+                parts = raw.strip().split(",")
+                if len(parts) < 2 or parts[0].startswith("#"):
+                    continue
+                try:
+                    degen.setdefault(parts[0], set()).add(int(parts[1]))
+                except ValueError:
+                    continue
 
     refs = collect(args.refdir)
     gots = collect(args.gotdir)
@@ -152,24 +179,28 @@ def main():
         print("输出目录没有可用的 CSV:", args.gotdir)
         return 2
 
-    print("=" * 84)
+    print("=" * 96)
     print("Cell Quality 逐值对比  (容差 rel<=%g)" % args.tol)
     print("  基准: %s" % args.refdir)
     print("  待测: %s" % args.gotdir)
-    print("=" * 84)
+    if degen:
+        print("  退化单元清单: %s (%d 个模型)" % (args.degenerate, len(degen)))
+    print("=" * 96)
 
     common = [k for k in refs if k in gots]
     only_ref = [k for k in refs if k not in gots]
 
-    print("%-22s %-18s %-8s %-8s %-9s %-9s %-11s %s" % (
-        "模型", "指标", "单元数", "一致", "类别不符", "数值不符", "最大绝对偏差", "结论"))
-    print("-" * 96)
+    print("%-22s %-18s %-8s %-8s %-9s %-9s %-8s %-11s %s" % (
+        "模型", "指标", "单元数", "一致", "类别不符", "数值不符", "退化不符", "最大绝对偏差", "结论"))
+    print("-" * 104)
 
     total_bad = 0
+    total_degen = 0
     for (model, measure) in sorted(common):
         _, _, refv = refs[(model, measure)]
         _, _, gotv = gots[(model, measure)]
-        st = compare(refv, gotv, unsupported=args.unsupported, tol=args.tol)
+        st = compare(refv, gotv, unsupported=args.unsupported, tol=args.tol,
+                     degenerate=degen.get(model))
         if st is None:
             print("%-22s %-18s  空数组" % (model, measure))
             total_bad += 1
@@ -179,9 +210,10 @@ def main():
         verdict = "PASS" if ok else "FAIL"
         if not ok:
             total_bad += 1
-        print("%-22s %-18s %-8d %-8d %-9d %-9d %-11.3g %s" % (
+        total_degen += st["degen_bad"]
+        print("%-22s %-18s %-8d %-8d %-9d %-9d %-8d %-11.3g %s" % (
             model, measure, st["n"], st["numeric_ok"], st["mismatch_kind"],
-            st["numeric_bad"], st["max_abs"], verdict))
+            st["numeric_bad"], st["degen_bad"], st["max_abs"], verdict))
         if st["len_ref"] != st["len_got"]:
             print("    ⚠ 长度不一致: 基准 %d / 待测 %d" % (st["len_ref"], st["len_got"]))
         for (i, a, b, kind) in st["worst"]:
@@ -193,8 +225,11 @@ def main():
         for (model, measure) in sorted(only_ref):
             print("   %s / %s" % (model, measure))
 
-    print("-" * 96)
+    print("-" * 104)
     print("对比完成: %d 个 (模型,指标) 组合, %d 个不一致" % (len(common), total_bad))
+    if total_degen:
+        print("另有 %d 项位于退化单元上（面法向近共线，acos 边界翻转，"
+              "不计入不一致）" % total_degen)
     print("=" * 96)
     return 0 if total_bad == 0 else 1
 
