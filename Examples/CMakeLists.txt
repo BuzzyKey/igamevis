@@ -581,6 +581,7 @@ igame_add_example(testGhostDemo Filter/GhostCell/TestGhostDemo.cpp)
 igame_add_example(testGroupDatasets Filter/TestGroupDatasets.cpp)
 # Modeling：线性拉伸（Linear Extrusion）
 igame_add_example(testLinearExtrusion Filter/TestLinearExtrusion.cpp)
+igame_add_example(testMedianFilter Filter/Median/TestMedianFilter.cpp)
 
 # ������ #5 + �е����� #28 ���ײ�������
 igame_add_example(testGhostCellModel Filter/GhostCell/TestGhostCellModel.cpp)
@@ -712,6 +713,9 @@ igame_add_example(testAppendAttributes Filter/AppendAttributes/TestAppendAttribu
 # ReverseSense
 igame_add_example(testReverseSense Filter/ReverseSense/TestReverseSense.cpp)
 igame_add_example(testReverseSenseSelfCheck Filter/ReverseSense/TestReverseSenseSelfCheck.cpp)
+
+# PerlinNoise: samples 3D Perlin noise at every input point into a point scalar array.
+igame_add_example(testPerlinNoise Filter/AttributeManipulation/TestPerlinNoise.cpp)
 
 get_property(IGAME_EXAMPLE_TARGETS DIRECTORY PROPERTY IGAME_EXAMPLE_TARGETS)
 if (NOT IGAME_EXAMPLE_TARGETS)
