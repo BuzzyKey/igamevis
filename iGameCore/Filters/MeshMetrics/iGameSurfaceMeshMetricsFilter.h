@@ -52,13 +52,7 @@ public:
     void SetPoints(Points::Pointer points) { m_Points = points; }
     bool Execute() override;
 
-protected:
-    SurfaceMeshMetricsFilter();
-    ~SurfaceMeshMetricsFilter();
-    SurfaceMetric m_Metric = SurfaceMetric::FACE_AREA; //质量指标类型
-
-    double ComputeMetric(igIndex vNum, igIndex* vhs);
-
+    // ---- 静态单元质量计算函数（供 MeshQuality / CellMeshMetrics 复用）----
     // 通用辅助方法
     static double GetInternalAnglesOfVertex(iGame::Point v0, iGame::Point v1, iGame::Point v2);
 
@@ -81,10 +75,19 @@ protected:
     static double ComputeQuadWarpage(const std::vector<iGame::Point>& points);
     static double ComputeQuadTaper(const std::vector<iGame::Point>& points);
     static double ComputeQuadSkew(const std::vector<iGame::Point>& points);
+    static double ComputeQuadStretch(const std::vector<iGame::Point>& points);
 
     static double ComputeFaceMinAngleQuality(const std::vector<iGame::Point>& points);
     static double ComputeSurfaceVolume(const std::vector<iGame::Point>& points);
     static double ComputeTotalSurfaceVolume(iGame::CellArray::Pointer faces, iGame::Points::Pointer points);
+
+protected:
+    SurfaceMeshMetricsFilter();
+    ~SurfaceMeshMetricsFilter();
+    SurfaceMetric m_Metric = SurfaceMetric::FACE_AREA; //质量指标类型
+
+    double ComputeMetric(igIndex vNum, igIndex* vhs);
+
 
     iGame::CellArray::Pointer m_Faces = nullptr; //存储表面网格的面信息
     iGame::Points::Pointer m_Points = nullptr;   //存储表面网格的点信息

@@ -1,4 +1,5 @@
 #include "iGameCellMeshMetricsFilter.h"
+#include "iGameSurfaceMeshMetricsFilter.h"
 
 IGAME_NAMESPACE_BEGIN
 
@@ -167,6 +168,56 @@ bool CellMeshMetricsFilter::ComputeCellMetrics(DataObject::Pointer input, DataOb
                         break;
                     default:
                         break; // 该指标对六面体不适用
+                }
+            } else if (type == IG_TRIANGLE && vNum == 3) {
+                switch (m_QualityMetric) {
+                    case QUALITY_EDGE_RATIO:
+                        val = SurfaceMeshMetricsFilter::ComputeTriangleEdgeRatio(pts);
+                        supported = true;
+                        break;
+                    case QUALITY_ASPECT_RATIO:
+                        val = SurfaceMeshMetricsFilter::ComputeTriangleAspectRatio(pts);
+                        supported = true;
+                        break;
+                    case QUALITY_MIN_ANGLE:
+                        val = SurfaceMeshMetricsFilter::ComputeTriangleMinAngle(pts);
+                        supported = true;
+                        break;
+                    default:
+                        break; // 三角形仅支持 EdgeRatio / AspectRatio / MinAngle（对齐 ParaView）
+                }
+            } else if (type == IG_QUAD && vNum == 4) {
+                switch (m_QualityMetric) {
+                    case QUALITY_EDGE_RATIO:
+                        val = SurfaceMeshMetricsFilter::ComputeQuadEdgeRatio(pts);
+                        supported = true;
+                        break;
+                    case QUALITY_ASPECT_RATIO:
+                        val = SurfaceMeshMetricsFilter::ComputeQuadAspectRatio(pts);
+                        supported = true;
+                        break;
+                    case QUALITY_JACOBIAN:
+                        val = SurfaceMeshMetricsFilter::ComputeQuadJacobian(pts);
+                        supported = true;
+                        break;
+                    case QUALITY_MIN_ANGLE:
+                        val = SurfaceMeshMetricsFilter::ComputeQuadMinAngle(pts);
+                        supported = true;
+                        break;
+                    case QUALITY_SKEW:
+                        val = SurfaceMeshMetricsFilter::ComputeQuadSkew(pts);
+                        supported = true;
+                        break;
+                    case QUALITY_TAPER:
+                        val = SurfaceMeshMetricsFilter::ComputeQuadTaper(pts);
+                        supported = true;
+                        break;
+                    case QUALITY_STRETCH:
+                        val = SurfaceMeshMetricsFilter::ComputeQuadStretch(pts);
+                        supported = true;
+                        break;
+                    default:
+                        break; // 四边形支持 7 项；对齐 ParaView Cell Quality
                 }
             }
 

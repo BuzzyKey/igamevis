@@ -4521,29 +4521,21 @@ void igQtMainWindow::initAllFilters() {
         // 2. 统一指标下拉框（与 ParaView 一致的交互，不再区分四面体/六面体专用算法）
         std::vector<QString> metricNames = {
                 QStringLiteral("边长比 (Edge Ratio)"),
-                QStringLiteral("单元体积 (Volume)"),
                 QStringLiteral("纵横比 (Aspect Ratio)"),
                 QStringLiteral("雅可比行列式 (Jacobian)"),
                 QStringLiteral("歪斜度 (Skew)"),
                 QStringLiteral("最小内角 (Minimum Angle)"),
                 QStringLiteral("锥度 (Taper)"),
-                QStringLiteral("伸展度 (Stretch)"),
-                QStringLiteral("对角线比值 (Diagonal)"),
-                QStringLiteral("最大长宽比 (Max Edge Ratio)"),
-                QStringLiteral("塌陷率 (Collapse Ratio)")};
+                QStringLiteral("伸展度 (Stretch)")};
 
         std::vector<iGame::CellMeshMetricsFilter::CellQualityMetric> metricEnums = {
                 iGame::CellMeshMetricsFilter::QUALITY_EDGE_RATIO,
-                iGame::CellMeshMetricsFilter::QUALITY_VOLUME,
                 iGame::CellMeshMetricsFilter::QUALITY_ASPECT_RATIO,
                 iGame::CellMeshMetricsFilter::QUALITY_JACOBIAN,
                 iGame::CellMeshMetricsFilter::QUALITY_SKEW,
                 iGame::CellMeshMetricsFilter::QUALITY_MIN_ANGLE,
                 iGame::CellMeshMetricsFilter::QUALITY_TAPER,
-                iGame::CellMeshMetricsFilter::QUALITY_STRETCH,
-                iGame::CellMeshMetricsFilter::QUALITY_DIAGONAL,
-                iGame::CellMeshMetricsFilter::QUALITY_MAX_EDGE_RATIO,
-                iGame::CellMeshMetricsFilter::QUALITY_COLLAPSE_RATIO};
+                iGame::CellMeshMetricsFilter::QUALITY_STRETCH};
 
         int comboID =
                 dialog->addParameter(igQtFilterDialogDockWidget::QT_COMBO_BOX, QStringLiteral("评估指标"), metricNames);

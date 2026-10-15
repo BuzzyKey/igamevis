@@ -200,12 +200,48 @@ double SurfaceMeshMetricsFilter::ComputeTriangleMaxAngle(const std::vector<Point
     return std::max({angle1, angle2, angle3});
 }
 
+// 三角形最小内角（度）
+// 严格对齐 Verdict tri_minimum_angle（V_TriMetric.cpp:422-483）：
+//   1) 三条边向量 sides[0]=P1-P0, sides[1]=P2-P1, sides[2]=P2-P0, sides[3]=-sides[1]
+//   2) 找出最短边 short_side
+//   3) 只计算该边所对的角（最短边对最小角），用 acos(dot/(|a||b|))
+// 旧实现分别算 3 个角再取 min：数学上等价，但 acos 在接近 1 处导数极大，
+// 三次调用中任意一次舍入都会放大误差（实测 bicycle 上 4/96668 个单元超差）。
+// 全程 double 以避免 Vector3f 的抵消误差。
 double SurfaceMeshMetricsFilter::ComputeTriangleMinAngle(const std::vector<Point>& points) {
-    double angle1 = GetInternalAnglesOfVertex(points[0], points[1], points[2]);
-    double angle2 = GetInternalAnglesOfVertex(points[1], points[0], points[2]);
-    double angle3 = GetInternalAnglesOfVertex(points[2], points[1], points[0]);
+    auto sub = [&](int a, int b, double out[3]) {
+        out[0] = static_cast<double>(points[a][0]) - points[b][0];
+        out[1] = static_cast<double>(points[a][1]) - points[b][1];
+        out[2] = static_cast<double>(points[a][2]) - points[b][2];
+    };
+    auto dot = [](const double u[3], const double v[3]) { return u[0] * v[0] + u[1] * v[1] + u[2] * v[2]; };
+    auto sq = [](const double v[3]) { return v[0] * v[0] + v[1] * v[1] + v[2] * v[2]; };
 
-    return std::min({angle1, angle2, angle3});
+    double sides[4][3];
+    sub(1, 0, sides[0]);   // P1 - P0
+    sub(2, 1, sides[1]);   // P2 - P1
+    sub(2, 0, sides[2]);   // P2 - P0
+    for (int k = 0; k < 3; ++k) { sides[3][k] = -sides[1][k]; }
+
+    const double l0 = sq(sides[0]), l1 = sq(sides[1]), l2 = sq(sides[2]);
+    if (l0 == 0.0 || l1 == 0.0 || l2 == 0.0) { return 0.0; }
+
+    int shortSide = 0;
+    if (l1 < l0) { shortSide = 1; }
+    if (l2 < (shortSide == 0 ? l0 : l1)) { shortSide = 2; }
+
+    const double* a = nullptr;
+    const double* b = nullptr;
+    if (shortSide == 0) { a = sides[2]; b = sides[1]; }
+    else if (shortSide == 1) { a = sides[0]; b = sides[2]; }
+    else { a = sides[0]; b = sides[3]; }
+
+    const double la = std::sqrt(sq(a));
+    const double lb = std::sqrt(sq(b));
+    if (la <= 0.0 || lb <= 0.0) { return 0.0; }
+
+    const double cosA = std::clamp(dot(a, b) / (la * lb), -1.0, 1.0);
+    return std::acos(cosA) * 180.0 / PI;
 }
 
 // 雅可比, range : [0, MAX], acceptable range [0, MAX], unit cube : 1
@@ -290,43 +326,123 @@ double SurfaceMeshMetricsFilter::ComputeQuadMaxAngle(const std::vector<Point>& p
     return *std::max_element(angles.begin(), angles.end());
 }
 
-// 最小角, range : [0, π], acceptable range [π/4, π/2], unit cube : π/3
+// 最小角, range : [0, π]
+// 对齐 Verdict quad_minimum_angle（V_QuadMetric.cpp:981-1036）：
+//   顶点 i 处的内角 = acos( -(e[i-1] · e[i]) / (|e[i-1]| * |e[i]|) )。
+// 全程 double：Vector3f 的抵消误差会让极小角偏差一个量级以上
+// （实测 bicycle 上 5/96668 个单元不符）。
 double SurfaceMeshMetricsFilter::ComputeQuadMinAngle(const std::vector<Point>& points) {
+    auto sub = [&](int a, int b, double out[3]) {
+        out[0] = static_cast<double>(points[a][0]) - points[b][0];
+        out[1] = static_cast<double>(points[a][1]) - points[b][1];
+        out[2] = static_cast<double>(points[a][2]) - points[b][2];
+    };
+    double e[4][3];
+    sub(1, 0, e[0]);
+    sub(2, 1, e[1]);
+    sub(3, 2, e[2]);
+    sub(0, 3, e[3]);
 
-    std::vector<double> angles;
-    angles.push_back(GetInternalAnglesOfVertex(points[1], points[0], points[2]));
-    angles.push_back(GetInternalAnglesOfVertex(points[2], points[1], points[3]));
-    angles.push_back(GetInternalAnglesOfVertex(points[3], points[2], points[0]));
-    angles.push_back(GetInternalAnglesOfVertex(points[0], points[3], points[1]));
-
-    return *std::min_element(angles.begin(), angles.end());
+    double mn = 360.0;
+    for (int i = 0; i < 4; ++i) {
+        const int j = (i + 1) % 4;
+        const double li = std::sqrt(e[i][0] * e[i][0] + e[i][1] * e[i][1] + e[i][2] * e[i][2]);
+        const double lj = std::sqrt(e[j][0] * e[j][0] + e[j][1] * e[j][1] + e[j][2] * e[j][2]);
+        if (li <= 0.0 || lj <= 0.0) { continue; }
+        const double d = e[i][0] * e[j][0] + e[i][1] * e[j][1] + e[i][2] * e[j][2];
+        const double angle = std::acos(std::clamp(-d / (li * lj), -1.0, 1.0)) * 180.0 / PI;
+        if (angle < mn) { mn = angle; }
+    }
+    return mn;
 }
 
 // 雅可比, range : [0, MAX], acceptable range [0, MAX], unit cube : 1
 double SurfaceMeshMetricsFilter::ComputeQuadJacobian(const std::vector<Point>& points) {
-    Point x_1 = (points[1] - points[0]) + (points[2] - points[3]);
-    Point x_2 = (points[2] - points[1]) + (points[3] - points[0]);
-    Point n_c = x_1.cross(x_2).normalized();
-    std::vector<double> alpha;
-    alpha.emplace_back(n_c * (points[0] - points[3]).cross(points[1] - points[0]).normalized());
-    alpha.emplace_back(n_c * (points[1] - points[0]).cross(points[2] - points[1]).normalized());
-    alpha.emplace_back(n_c * (points[2] - points[1]).cross(points[3] - points[2]).normalized());
-    alpha.emplace_back(n_c * (points[3] - points[2]).cross(points[0] - points[3]).normalized());
+    // 对齐 Verdict quad_jacobian（V_QuadMetric.cpp:1169-1186）：
+    //   jacobian = min(0..3) of [ 中心法向 · 各顶点角法向 ]
+    //   顶点角法向是【未归一化】的叉积（等于 2 倍三角形面积）。
+    // 旧实现对角法向多做了 .normalized()，于是平面四边形的结果恒为 ±1，
+    // 丢了面积量纲：2x1 矩形应得 2.0，旧实现得 1.0。
+    const Point e0 = points[1] - points[0];
+    const Point e1 = points[2] - points[1];
+    const Point e2 = points[3] - points[2];
+    const Point e3 = points[0] - points[3];
 
-    return *std::min_element(alpha.begin(), alpha.end());
+    const Point cn0 = e3.cross(e0);
+    const Point cn1 = e0.cross(e1);
+    const Point cn2 = e1.cross(e2);
+    const Point cn3 = e2.cross(e3);
+
+    const Point pa0 = e0 - e2;
+    const Point pa1 = e1 - e3;
+    Point n_c = pa0.cross(pa1);
+    const double nLen = n_c.norm();
+    if (nLen < 1e-30) { return 0.0; } // 退化四边形
+    n_c = n_c / nLen;
+
+    const double a0 = n_c.dot(cn0);
+    const double a1 = n_c.dot(cn1);
+    const double a2 = n_c.dot(cn2);
+    const double a3 = n_c.dot(cn3);
+
+    return std::min(std::min(a0, a1), std::min(a2, a3));
 }
 
-// 纵横比 , range : [1, MAX], acceptable range [1, 1.3], unit cube : 1
+// 纵横比 , range : [1, MAX]
+// 严格对齐 Verdict quad_aspect_ratio（V_QuadMetric.cpp:448-479）：
+//   hm = max(4 条边长)
+//   分母 = Σ assert_signed_corner_areas[i]（4 个顶点的【带符号角面积】之和）
+//   aspect_ratio = hm * (a1+b1+c1+d1) / 分母
+// 关键：分母不是 4 倍面积，而是 signed_corner_areas 之和 ——
+// 两者对平面四边形数值接近但不相等（面积用三角形分解，角面积用顶点叉积），
+// 这正是旧实现偏差 1.7e-4 ~ 2.8e-3、15736/96668 个单元超差的原因。
+// 全程 double，且 char_size 归一化在比值中抵消，此处直接在原始尺度计算。
 double SurfaceMeshMetricsFilter::ComputeQuadAspectRatio(const std::vector<Point>& points) {
-    std::vector<double> v;
-    double area = ComputeQuadArea(points);
+    auto sub = [&](int a, int b, double out[3]) {
+        out[0] = static_cast<double>(points[a][0]) - points[b][0];
+        out[1] = static_cast<double>(points[a][1]) - points[b][1];
+        out[2] = static_cast<double>(points[a][2]) - points[b][2];
+    };
+    auto len = [](const double v[3]) { return std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]); };
+    auto cross = [](const double u[3], const double v[3], double out[3]) {
+        out[0] = u[1] * v[2] - u[2] * v[1];
+        out[1] = u[2] * v[0] - u[0] * v[2];
+        out[2] = u[0] * v[1] - u[1] * v[0];
+    };
+    auto dot = [](const double u[3], const double v[3]) { return u[0] * v[0] + u[1] * v[1] + u[2] * v[2]; };
 
-    v.push_back((points[1] - points[0]).norm());
-    v.push_back((points[2] - points[1]).norm());
-    v.push_back((points[3] - points[2]).norm());
-    v.push_back((points[0] - points[3]).norm());
+    // 4 条边（Verdict make_quad_edges 的同一约定）
+    double e[4][3];
+    sub(1, 0, e[0]);
+    sub(2, 1, e[1]);
+    sub(3, 2, e[2]);
+    sub(0, 3, e[3]);
 
-    return (*std::max_element(v.begin(), v.end())) * (v[0] + v[1] + v[2] + v[3]) / (4.0 * area);
+    const double l0 = len(e[0]), l1 = len(e[1]), l2 = len(e[2]), l3 = len(e[3]);
+    double ma = (l0 > l1) ? l0 : l1;
+    double mb = (l2 > l3) ? l2 : l3;
+    const double hm = (ma > mb) ? ma : mb;
+
+    // signed_corner_areas：中心法向 · 各顶点角法向（未归一化叉积）
+    double cn[4][3];
+    cross(e[3], e[0], cn[0]);
+    cross(e[0], e[1], cn[1]);
+    cross(e[1], e[2], cn[2]);
+    cross(e[2], e[3], cn[3]);
+
+    double pa0[3], pa1[3], nc[3];
+    for (int k = 0; k < 3; ++k) { pa0[k] = e[0][k] - e[2][k]; }
+    for (int k = 0; k < 3; ++k) { pa1[k] = e[1][k] - e[3][k]; }
+    cross(pa0, pa1, nc);
+    const double nlen = len(nc);
+    if (nlen <= 0.0) { return 1e30; }
+    for (int k = 0; k < 3; ++k) { nc[k] /= nlen; }
+
+    const double denom = dot(nc, cn[0]) + dot(nc, cn[1]) + dot(nc, cn[2]) + dot(nc, cn[3]);
+    if (std::fabs(denom) < 1e-300) { return 1e30; }
+
+    const double aspectRatio = hm * (l0 + l1 + l2 + l3) / denom;
+    return (aspectRatio < 1e30) ? aspectRatio : 1e30;
 }
 
 // 长宽比 , range : [1, MAX], acceptable range [1, 1.3], unit cube : 1
@@ -338,6 +454,50 @@ double SurfaceMeshMetricsFilter::ComputeQuadEdgeRatio(const std::vector<Point>& 
     v.push_back((points[0] - points[3]).norm());
 
     return *std::max_element(v.begin(), v.end()) / *std::min_element(v.begin(), v.end());
+}
+
+// 伸展度 (Stretch), range : [0, 1]
+// 对齐 Verdict quad_stretch（V_QuadMetric.cpp:864-903）：
+//   1) 特征尺寸 char_size = 8 个坐标包围盒的对角线长度，用它归一化 4 条边与 2 条对角线；
+//   2) diag = max(|P2-P0|², |P3-P1|²) / char_size²；
+//   3) stretch = sqrt(2) * sqrt( min(4 条边长²) / diag )。
+// 注：这是一次比值运算，char_size 在分子分母中会部分抵消，
+//     但 Verdict 的实现确实先做了归一化，为求逐值一致这里照做。
+double SurfaceMeshMetricsFilter::ComputeQuadStretch(const std::vector<Point>& points) {
+    // 包围盒对角线（Verdict elem_scaling）
+    Point bmin = points[0];
+    Point bmax = points[0];
+    for (int i = 1; i < 4; ++i) {
+        for (int k = 0; k < 3; ++k) {
+            if (points[i][k] < bmin[k]) { bmin[k] = points[i][k]; }
+            if (points[i][k] > bmax[k]) { bmax[k] = points[i][k]; }
+        }
+    }
+    double charSize = (bmax - bmin).norm();
+    if (charSize < 1e-30) { charSize = 1.0; }
+
+    const double inv = 1.0 / charSize;
+    const Point e0 = (points[1] - points[0]) * inv;
+    const Point e1 = (points[2] - points[1]) * inv;
+    const Point e2 = (points[3] - points[2]) * inv;
+    const Point e3 = (points[0] - points[3]) * inv;
+
+    const double l0 = e0.squaredNorm();
+    const double l1 = e1.squaredNorm();
+    const double l2 = e2.squaredNorm();
+    const double l3 = e3.squaredNorm();
+
+    const double d02 = ((points[2] - points[0]) * inv).squaredNorm();
+    const double d13 = ((points[3] - points[1]) * inv).squaredNorm();
+    const double diag = (d02 > d13) ? d02 : d13;
+
+    if (diag < 1e-300) { return 0.0; }
+
+    double minLen2 = (l0 < l1) ? l0 : l1;
+    const double m23 = (l2 < l3) ? l2 : l3;
+    if (m23 < minLen2) { minLen2 = m23; }
+
+    return std::sqrt(2.0) * std::sqrt(minLen2 / diag);
 }
 
 // 翘曲 , range : [0, 1], acceptable range [0, 0.7], unit cube : 0
