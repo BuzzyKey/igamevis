@@ -12,6 +12,9 @@
 #include <IQWidgets/igQtPointAndCellIdsWidget.h>
 #include <IQWidgets/igQtResampleToImageWidget.h>
 #include <IQWidgets/igQtResampleToLineWidget.h>
+#include <IQWidgets/igQtResampleWithDataSetWidget.h>
+#include <IQWidgets/igQtRenameArraysWidget.h>
+#include <IQWidgets/igQtTextureMapToCylinderWidget.h>
 #include <IQWidgets/igQtTriangleStripWidget.h>
 #include <CellSize/iGameCellSizeFilter.h>
 #include <iGameScene.h>
@@ -60,7 +63,8 @@ bool igQtMainWindow::connectImportedFilterAction(QAction* action, const QString&
         "cell_size", "count_cell_vertices", "extract_edges",
         "global_point_and_cell_ids", "point_and_cell_ids", "process_ids", "reflect",
         "axis_aligned_reflection", "extract_component", "merge_vector_components",
-        "resample_to_image", "resample_to_line", "triangle_strips"};
+        "rename_arrays", "resample_to_image", "resample_to_line",
+        "resample_with_dataset", "triangle_strips","texture_map_to_cylinder"};
     if (!ids.contains(filterId)) return false;
 
     auto displayResult = [this](DataObject::Pointer output) {
@@ -197,6 +201,18 @@ bool igQtMainWindow::connectImportedFilterAction(QAction* action, const QString&
                 connect(p, &igQtResampleToLine::ResetInteractor, dock, &QDockWidget::hide);
             }, modelTreeWidget);
             panel->BindCurrentModel();
+        } else if (id == "resample_with_dataset") {
+            auto* panel = filterPanel<igQtResampleWithDataSet>(this, id, title, [](auto*, auto*) {}, modelTreeWidget);
+            panel->BindCurrentModel();
+        } else if (id == "rename_arrays") {
+            auto* panel = filterPanel<igQtRenameArrays>(this, id, title, [](auto*, auto*) {}, modelTreeWidget);
+            panel->BindCurrentModel();
+        } else if (id == "texture_map_to_cylinder") {
+            auto* panel = filterPanel<igQtTextureMapToCylinderWidget>(this, id, title, [&](auto* p, auto*) {
+                connect(p, &igQtTextureMapToCylinderWidget::DrawResultModel, this, displayResult);
+                connect(p, &igQtTextureMapToCylinderWidget::UpdateResultModel, this, displayResult);
+            });
+            panel->SetOriginDataObject(input);
         }
         showFilterPanel(this, id);
     });
