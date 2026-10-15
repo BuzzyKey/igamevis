@@ -1,4 +1,6 @@
 #include "iGameFileIO.h"
+#include "Spectral/iGameSpectralReaderCPU.h"
+#include "iGameDrawObject.h"
 
 #include "Abaqus/iGameODBReader.h"
 #include "CGNS/iGameCGNSReader.h"
@@ -6,6 +8,7 @@
 #include "Fluent/iGameCASReader.h"
 #include "Ansys/iGameAnsysReader.h"
 #include "CCM/iGameCCMReader.h"
+#include "LsDyna/iGameLsDynaReader.h"
 #include "IGC/iGameIGCMReader.h"
 #include "IGC/iGameIGCMTimeSeriesWriter.h"
 #include "IGC/iGameIGCMWriter.h"
@@ -26,6 +29,7 @@
 #include "VTK XML/iGameVTMReader.h"
 #include "VTK XML/iGameVTPReader.h"
 #include "VTK XML/iGameVTSReader.h"
+#include "VTK XML/iGameVTIReader.h"
 #include "VTK XML/iGameVTUReader.h"
 #include "VTK/iGameVTKReader.h"
 #include "VTK/iGameVTKWriter.h"
@@ -34,6 +38,7 @@
 #include "iGameProgressObserver.h"
 #include <Nastran/iGameNastranReader.h>
 #include <VTK XML/iGameVTMWriter.h>
+#include <exception>
 #include <filesystem>
 
 IGAME_NAMESPACE_BEGIN
@@ -45,7 +50,12 @@ IGenum FileIO::GetFileType(const std::string& file_name) {
     for (char& c: FileSuffix) {
         if (c >= 'A' && c <= 'Z') { c = static_cast<char>(c - 'A' + 'a'); }
     }
-    if (FileSuffix == "vtk") {
+    if (FileSuffix == "dat") {
+        return SPECTRAL_DAT;
+    } else if (FileSuffix == "fld" ||
+               (FileSuffix == "xml" && SpectralReaderCPU::IsNektarFile(file_name))) {
+        return SPECTRAL_NEKTAR;
+    } else if (FileSuffix == "vtk") {
         return VTK;
     } else if (FileSuffix == "igc") {
         return IGC;
@@ -69,6 +79,8 @@ IGenum FileIO::GetFileType(const std::string& file_name) {
         return PVD;
     } else if (FileSuffix == "vts") {
         return VTS;
+    } else if (FileSuffix == "vti") {
+        return VTI;
     } else if (FileSuffix == "vtu") {
         return VTU;
     } else if (FileSuffix == "vtp") {
@@ -93,6 +105,27 @@ IGenum FileIO::GetFileType(const std::string& file_name) {
         return RST;
     } else if (FileSuffix == "rth") {
         return RTH;
+    }
+    // LS-DYNA d3plot：文件可能带 .d3plot 扩展名，也可能是无扩展名的 d3plot / d3plot01 / d3plot02 ...
+    if (FileSuffix == "d3plot") {
+        return D3PLOT;
+    }
+    {
+        const auto slash = file_name.find_last_of("/\\");
+        std::string baseName = file_name.substr(slash == std::string::npos ? 0 : slash + 1);
+        for (char& c : baseName) {
+            if (c >= 'A' && c <= 'Z') { c = static_cast<char>(c - 'A' + 'a'); }
+        }
+        if (baseName.rfind("d3plot", 0) == 0) {
+            bool allDigits = true;
+            for (size_t i = 6; i < baseName.size(); ++i) {
+                if (baseName[i] < '0' || baseName[i] > '9') {
+                    allDigits = false;
+                    break;
+                }
+            }
+            if (allDigits) { return D3PLOT; }
+        }
     }
     return NONE;
 }
@@ -125,6 +158,8 @@ std::string FileIO::GetFileTypeAsString(IGenum type) {
             return "PVD";
         case VTS:
             return "VTS";
+        case VTI:
+            return "VTI";
         case VTM:
             return "VTM";
         case VTU:
@@ -147,12 +182,18 @@ std::string FileIO::GetFileTypeAsString(IGenum type) {
             return "RST";
         case RTH:
             return "RTH";
+        case D3PLOT:
+            return "D3PLOT";
+        case SPECTRAL_DAT:
+            return "Jacobi DAT";
+        case SPECTRAL_NEKTAR:
+            return "Nektar++ XML/FLD";
         default:
             return "NONE";
     }
 }
 
-static AttributeSet::Pointer TransformScalars2VectorArray(AttributeSet* Attrs) {
+static AttributeSet::Pointer TransformScalars2VectorArray(AttributeSet* Attrs, bool mergeNumericComponents = true) {
     AttributeSet::Pointer newAttrs = AttributeSet::New();
     int size = Attrs->GetNumberOfAttributes();
     for (int i = 0; i < size; i++) {
@@ -183,7 +224,7 @@ static AttributeSet::Pointer TransformScalars2VectorArray(AttributeSet* Attrs) {
                     isvector = false;
                 }
             }
-        } else if (name[name.length() - 1] == '0') {
+        } else if (mergeNumericComponents && name[name.length() - 1] == '0') {
             isvector = true;
             int j = 1;
             for (j = 1; j < 3; j++) {
@@ -198,7 +239,7 @@ static AttributeSet::Pointer TransformScalars2VectorArray(AttributeSet* Attrs) {
                     isvector = false;
                 }
             }
-        } else if (name[name.length() - 1] == '1') {
+        } else if (mergeNumericComponents && name[name.length() - 1] == '1') {
             isvector = true;
             int j = 1;
             for (j = 1; j < 3; j++) {
@@ -282,11 +323,12 @@ static AttributeSet::Pointer TransformScalars2VectorArray(AttributeSet* Attrs) {
     return newAttrs;
 }
 
-static DataObject::Pointer FinalizeLoadedObject(DataObject::Pointer resObj, const std::string& objectName) {
+static DataObject::Pointer FinalizeLoadedObject(DataObject::Pointer resObj, const std::string& objectName,
+                                              bool mergeNumericComponents = true) {
     if (resObj) {
         if (!objectName.empty()) { resObj->SetName(objectName); }
         if (resObj->GetAttributeSet()) {
-            resObj->SetAttributeSet(TransformScalars2VectorArray(resObj->GetAttributeSet()));
+            resObj->SetAttributeSet(TransformScalars2VectorArray(resObj->GetAttributeSet(), mergeNumericComponents));
         }
     }
 
@@ -298,6 +340,19 @@ static DataObject::Pointer FinalizeLoadedObject(DataObject::Pointer resObj, cons
 }
 
 DataObject::Pointer FileIO::ReadFile(const std::string& file_name) {
+    return ReadFileWithRenderingPolicy(file_name, false);
+}
+
+DataObject::Pointer FileIO::ReadRemoteFile(const std::string& file_name) {
+    return ReadFileWithRenderingPolicy(file_name, true);
+}
+
+DataObject::Pointer FileIO::ReadFileWithRenderingPolicy(const std::string& file_name, bool remoteRendering) {
+    // 读取阶段不再执行“转可绘制数据”。这里只读盘/解析/挂载，转换推迟到第一次渲染
+    // （Scene::DrawFrame → SyncGpuBuffers）或第一次 GetRenderableObject() 时执行，
+    // 使“打开文件”耗时与 ParaView 的 reader-only 口径对等。
+    DataObject::DeferDrawableConversionScope deferDrawableConversion;
+    try {
     IGenum fileType = GetFileType(file_name);
     std::string out;
     out.append("Read file [type: ");
@@ -307,6 +362,12 @@ DataObject::Pointer FileIO::ReadFile(const std::string& file_name) {
 
     start = clock();
     switch (fileType) {
+        case SPECTRAL_DAT:
+        case SPECTRAL_NEKTAR: {
+            auto reader = SpectralReaderCPU::New();
+            resObj = reader->ReadFile(file_name);
+            break;
+        }
         case NONE: {
             break;
         }
@@ -395,6 +456,13 @@ DataObject::Pointer FileIO::ReadFile(const std::string& file_name) {
             resObj = reader->GetOutput();
             break;
         }
+        case iGame::FileIO::VTI: {
+            iGameVTIReader::Pointer reader = iGameVTIReader::New();
+            reader->SetFilePath(file_name);
+            reader->Execute();
+            resObj = reader->GetOutput();
+            break;
+        }
         case iGame::FileIO::VTU: {
             iGameVTUReader::Pointer reader = iGameVTUReader::New();
             reader->SetFilePath(file_name);
@@ -419,6 +487,7 @@ DataObject::Pointer FileIO::ReadFile(const std::string& file_name) {
         }
         case iGame::FileIO::VTM: {
             iGameVTMReader::Pointer reader = iGameVTMReader::New();
+            reader->SetRemoteRenderingEnabled(remoteRendering);
             reader->SetFilePath(file_name);
             reader->Execute();
             resObj = reader->GetOutput();
@@ -426,6 +495,7 @@ DataObject::Pointer FileIO::ReadFile(const std::string& file_name) {
         }
         case iGame::FileIO::BDF: {
             NastranReader::Pointer reader = NastranReader::New();
+            reader->SetRemoteConversionEnabled(remoteRendering);
             reader->SetFilePath(file_name);
             reader->Execute();
             resObj = reader->GetOutput();
@@ -433,6 +503,7 @@ DataObject::Pointer FileIO::ReadFile(const std::string& file_name) {
         }
         case iGame::FileIO::CAS: {
             CASReader::Pointer reader = CASReader::New();
+            reader->SetRemoteConversionEnabled(remoteRendering);
             reader->SetFilePath(file_name);
             reader->Execute();
             resObj = reader->GetOutput();
@@ -453,14 +524,27 @@ DataObject::Pointer FileIO::ReadFile(const std::string& file_name) {
             resObj = reader->GetOutput();
             break;
         }
+        case iGame::FileIO::D3PLOT: {
+            LsDynaReader::Pointer reader = LsDynaReader::New();
+            reader->SetFilePath(file_name);
+            reader->Execute();
+            resObj = reader->GetOutput();
+            break;
+        }
 
         default:
             break;
     }
 
-    std::filesystem::path pathObj(file_name);
-    std::string baseName = pathObj.stem().string();
-    resObj = FinalizeLoadedObject(resObj, baseName);
+    const auto slash = file_name.find_last_of("/\\");
+    std::string baseName = file_name.substr(slash == std::string::npos ? 0 : slash + 1);
+    const auto dot = baseName.find_last_of('.');
+    if (dot != std::string::npos) { baseName.erase(dot); }
+    if (remoteRendering && resObj) {
+        if (auto draw = DynamicCast<DrawObject>(resObj)) draw->SetRemoteRenderingEnabled(true);
+    }
+    // CGNS groups X/Y/Z vector fields; numbered scalar arrays remain independent in vtkCGNSReader.
+    resObj = FinalizeLoadedObject(resObj, baseName, fileType != CGNS);
 
     end = clock();
     out.append(", success: ");
@@ -470,6 +554,17 @@ DataObject::Pointer FileIO::ReadFile(const std::string& file_name) {
     out.append("]");
     igDebug(out);
     return resObj;
+    } catch (const std::exception& error) {
+        IGAME_CORE_ERROR("Failed to read file '{}': {}", file_name, error.what());
+    } catch (...) {
+        IGAME_CORE_ERROR("Failed to read file '{}' due to an unknown error", file_name);
+    }
+
+    if (auto* progress = ProgressObserver::Instance()) {
+        progress->UpdateProgress(0.0);
+        progress->UpdateText("");
+    }
+    return nullptr;
 }
 
 DataObject::Pointer FileIO::ReadVTKFromMemory(const void* data, size_t size) {
@@ -595,6 +690,9 @@ bool FileIO::WriteFile(const std::string& file_name, DataObject::Pointer dataObj
             break;
         }
         case iGame::FileIO::VTS: {
+            break;
+        }
+        case iGame::FileIO::VTI: {
             break;
         }
         case iGame::FileIO::VTU: {

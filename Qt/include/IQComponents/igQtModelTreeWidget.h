@@ -16,6 +16,7 @@
 #include <qboxlayout.h>
 
 #include <iostream>
+#include <vector>
 
 class igQtModelTreeWidget; // forward declaration for dynamic_cast in SubAttribTreeWidgetItem
 
@@ -60,6 +61,15 @@ public:
 
     void setCurrentChild(QTreeWidgetItem* child);
     QTreeWidgetItem* getCurrentChild();
+
+    /**
+     * 按模型的【实际可见性】刷新眼睛图标；只改图标，不改变任何状态。
+     *
+     * 与 getVisibility() 同一准则：以「画面上是否真的可见」为准 ——
+     * 容器模型不绘制自身、只绘制子块，容器图标必须跟着子树变化；
+     * 组内的块是原模型的深拷贝克隆，显隐各自独立，按真实状态读取即可。
+     */
+    void refreshVisibilityIcon();
 
     int getModelId() const { return modelId; }
     void setModelId(int id) { modelId = id; }
@@ -107,6 +117,9 @@ public:
 
     void setDimension(int length);
     int getDimension() const { return m_Dimension; }
+
+    /** 该行对应 AttributeSet 里的下标（供转换后原地刷新挂载类型图标用） */
+    int attributeIndex() const { return index; }
 
     int currentIndex() const { return comboBox->currentIndex(); }
     void show() { comboBox->show(); }
@@ -205,9 +218,13 @@ public:
     SubAttribTreeWidgetItem(int index, QTreeWidget* treeview = nullptr, SubObjectTreeWidgetItem* parent = nullptr)
         : QTreeWidgetItem(parent), m_Index(index), m_Tree(treeview), m_Parent(parent) {
         QWidget* widget = new QWidget(treeview);
+        widget->setStyleSheet(QStringLiteral("background-color: transparent; border: none;"));
         m_Combo = new MComboBox(this, widget);
-        m_Combo->setStyleSheet("QComboBox { background-color: transparent; }"
-                               "QComboBox QAbstractItemView { background-color: white; }");
+        auto* comboLayout = new QHBoxLayout(widget);
+        comboLayout->setContentsMargins(0, 0, 0, 0);
+        comboLayout->addWidget(m_Combo);
+        m_Combo->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+        m_Combo->setStyleSheet("QComboBox { background-color: transparent; }");
         setDimension(1);
         treeview->setItemWidget(this, 1, widget);
         hide();
@@ -238,6 +255,8 @@ public:
     }
 
     int getDimension() const { return m_Dimension; }
+    /** 该行对应（子块）AttributeSet 里的下标 */
+    int attributeIndex() const { return m_Index; }
 
     int currentIndex() const { return m_Combo->currentIndex(); }
     void show() { m_Combo->show(); }
@@ -270,17 +289,64 @@ public:
 
     ModelTreeWidgetItem* getItem(const QPoint& p) const;
     QTreeWidgetItem* getChild(const QPoint& p) const;
+    void setLeftColumnPercent(int percent);
+
+    /**
+     * 当前选中的【一组】数据对象。
+     *
+     * 映射规则：
+     *   - 顶层模型行        -> model->GetDataObject()
+     *   - 多块装配体的子块行 -> sub->getDataObject()   （子块本身，而不是它的父模型）
+     *   - 属性行（Point/Cell 属性）-> 忽略
+     *
+     * 供【多输入 filter】（如多选合组）使用。需要 Ctrl / Shift 配合多选。
+     */
+    std::vector<iGame::DataObject::Pointer> getSelectedDataObjects() const;
+
+    /**
+     * 当前选中的【单个】数据对象；无选中时返回 nullptr。
+     *
+     * 多选时以 currentItem（最后点击 / 键盘移动到的那个）为准 —— selectedItems()
+     * 的返回顺序依赖内部选择模型的实现细节，不保证与用户点击顺序一致。
+     * currentItem 是属性行时，上下文取该属性行【所属】的数据对象：
+     *   · 子块属性行 -> 所属子块；顶层模型属性行 -> 模型根对象
+     *   （不能靠 selectedItems() 回落：点击属性行会 setCurrentItem，单选模式下
+     *     数据对象行的选中被清掉，回落会错误地拿到模型根 —— 信息框/色条会显示根）。
+     *
+     * 供【单输入 filter】使用：选中多块子块时会返回该子块本身。
+     */
+    iGame::DataObject::Pointer getSingleSelectedDataObject() const;
+
+    /**
+     * 按【每个节点的真实可见性】刷新整棵树的眼睛图标（只改图标，不改状态）。
+     *
+     * 为什么需要全树刷新（每次切换显隐后）：
+     *   · 顶层模型行的显隐会递归作用到多块子块（Model::Hide()），
+     *     展开出的子块行图标必须跟着变；
+     *   · 容器模型（组）不绘制自身，其图标以【子树中是否还有可见节点】为准，
+     *     任一子块切换后容器行图标也可能变化。
+     * 组内的块是原模型的深拷贝克隆，显隐相互独立 —— 本方法只按各节点真实的
+     * GetVisibility() 重刷图标，不传播任何状态。
+     */
+    void syncVisibilityIcons();
 
     //void setCurrentModelItem(ModelTreeWidgetItem* item);
     //ModelTreeWidgetItem* getCurrentModelItem();
 
 protected:
     void mousePressEvent(QMouseEvent* event) override;
+    void resizeEvent(QResizeEvent* event) override;
+    void showEvent(QShowEvent* event) override;
 
 signals:
     void ChangeCurrentModel(iGame::Model* model);
     void ViewCloudPicture();
 
 private:
+    void applyColumnProportions();
+    QRect eyeHitRect(const QTreeWidgetItem* item) const;
     //ModelTreeWidgetItem* currentModelItem{nullptr};
+    int m_leftPercent = 36;
+    int m_lastLeft = -1;
+    int m_lastRight = -1;
 };
