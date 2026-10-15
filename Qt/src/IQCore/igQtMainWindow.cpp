@@ -5123,6 +5123,7 @@ void igQtMainWindow::initAllFilters() {
             developingFilters->actions().last()->setData(QString::fromLatin1(entry.id));
         }
     }
+
     QAction* cellMetricsDevelopment = developingFilters->addAction(
             QStringLiteral("单元网格指标 (CellMeshMetrics)"));
     cellMetricsDevelopment->setData(QStringLiteral("cell_mesh_metrics"));
@@ -6678,6 +6679,16 @@ void igQtMainWindow::initAllFilters() {
                     dialog->close();
                 });
             });
+    // 9.28 布置的第二批 filter：按上游约定追加在「开发中filter/第二批」末尾。
+    // 这里只放代理入口，实际行为由「标准过滤器」里同 id 的 QAction 承担
+    // （见 igQtMainWindowStandardFilters.cpp 的 filterPanel 懒加载面板）。
+    static const DevelopmentEntry batch2Entries[] = {
+        {"texture_map_to_cylinder", "圆柱纹理坐标 (Texture Map To Cylinder)"},
+    };
+    for (const DevelopmentEntry& entry : batch2Entries) {
+        addDevelopmentAction(developingFiltersBatch2, approvedFilter(entry.id),
+                             QString::fromUtf8(entry.label));
+    }
     // ---------- 表面切向量 (Generate Surface Tangents)：追加在“开发中filter/第二批”菜单末尾 ----------
     QAction* generateSurfaceTangentsAction =
             developingFiltersBatch2->addAction(QStringLiteral("表面切向量 (Generate Surface Tangents)"));

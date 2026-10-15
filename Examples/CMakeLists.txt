@@ -715,6 +715,8 @@ igame_add_example(testAppendAttributes Filter/AppendAttributes/TestAppendAttribu
 # ReverseSense
 igame_add_example(testReverseSense Filter/ReverseSense/TestReverseSense.cpp)
 igame_add_example(testReverseSenseSelfCheck Filter/ReverseSense/TestReverseSenseSelfCheck.cpp)
+# Cylinder texture mapping
+igame_add_example(testTextureMapToCylinder Filter/TestTextureMapToCylinder.cpp)
 
 # PerlinNoise: samples 3D Perlin noise at every input point into a point scalar array.
 igame_add_example(testPerlinNoise Filter/AttributeManipulation/TestPerlinNoise.cpp)
