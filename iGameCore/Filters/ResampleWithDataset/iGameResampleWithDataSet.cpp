@@ -2497,6 +2497,63 @@ bool ResampleWithDataSet::IsPointInVolumeCell(const UnstructuredMesh::Pointer& m
 /* ------------------------------------------------------------------ */
 bool ResampleWithDataSet::ComputeMeanValueWeights(const UnstructuredMesh::Pointer& mesh, igIndex cellId, const Point& p,
                                              double distTol, std::vector<double>& weights) {
+    // Eight-node hexahedra use their trilinear isoparametric basis, rather
+    // than rebuilding faces and evaluating polyhedral mean-value coordinates.
+    if (mesh->GetCellType(cellId) == IG_HEXAHEDRON && mesh->GetCells()->GetCellSize(cellId) == 8) {
+        igIndex ids[8];
+        mesh->GetCellPointIds(cellId, ids);
+        double xyz[8][3], lo[3] = {DBL_MAX, DBL_MAX, DBL_MAX};
+        double hi[3] = {-DBL_MAX, -DBL_MAX, -DBL_MAX};
+        for (int i = 0; i < 8; ++i) {
+            const auto& q = mesh->GetPoint(ids[i]);
+            for (int j = 0; j < 3; ++j) {
+                xyz[i][j] = q[j];
+                lo[j] = std::min(lo[j], xyz[i][j]);
+                hi[j] = std::max(hi[j], xyz[i][j]);
+            }
+        }
+        double scale2 = 0.;
+        for (int j = 0; j < 3; ++j) { scale2 += (hi[j] - lo[j]) * (hi[j] - lo[j]); }
+        const double scale = std::sqrt(scale2);
+        const double padding = std::max(distTol, 4. * kVTKParamDomainTol * scale);
+        for (int j = 0; j < 3; ++j) {
+            if (p[j] < lo[j] - padding || p[j] > hi[j] + padding) { return false; }
+        }
+        double pc[3] = {0., 0., 0.}, sf[8];
+        for (int iter = 0; iter < 32; ++iter) {
+            double residual[3] = {-double(p[0]), -double(p[1]), -double(p[2])};
+            double jac[3][3] = {};
+            for (int i = 0; i < 8; ++i) {
+                const auto& sign = kQuadHexSign[i];
+                const double a = 1. + sign[0] * pc[0], b = 1. + sign[1] * pc[1], c = 1. + sign[2] * pc[2];
+                sf[i] = a * b * c * 0.125;
+                const double deriv[3] = {sign[0] * b * c * .125, sign[1] * a * c * .125,
+                                         sign[2] * a * b * .125};
+                for (int j = 0; j < 3; ++j) {
+                    residual[j] += sf[i] * xyz[i][j];
+                    for (int k = 0; k < 3; ++k) { jac[k][j] += deriv[k] * xyz[i][j]; }
+                }
+            }
+            const double det = Det3(jac[0], jac[1], jac[2]);
+            if (!std::isfinite(det) || std::abs(det) < 1e-30) { return false; }
+            const double error = std::sqrt(residual[0]*residual[0] + residual[1]*residual[1] + residual[2]*residual[2]);
+            if (error <= std::max(1e-12, scale * 1e-10)) {
+                // Bound extrapolation by the requested physical tolerance.
+                const double tol = 2. * distTol / std::max(scale, 1e-12);
+                for (double v : pc) { if (!std::isfinite(v) || std::abs(v) > 1. + tol) { return false; } }
+                weights.assign(sf, sf + 8);
+                return true;
+            }
+            const double step[3] = {Det3(residual, jac[1], jac[2]) / det,
+                                    Det3(jac[0], residual, jac[2]) / det,
+                                    Det3(jac[0], jac[1], residual) / det};
+            for (int j = 0; j < 3; ++j) {
+                pc[j] -= step[j];
+                if (!std::isfinite(pc[j]) || std::abs(pc[j]) > 1e3) { return false; }
+            }
+        }
+        return false;
+    }
     auto cell = mesh->GetCell(cellId);
     if (cell == nullptr) { return false; }
 

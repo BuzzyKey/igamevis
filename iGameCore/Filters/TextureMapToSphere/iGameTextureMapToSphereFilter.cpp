@@ -31,7 +31,7 @@ void TextureMapToSphereFilter::SetCenter(double x, double y, double z) {
     m_Center[0] = x;
     m_Center[1] = y;
     m_Center[2] = z;
-    // 显式给了球心，就不再用包围盒中心
+    // 显式给了球心，就不再自动计算点坐标平均值
     m_AutomaticCenter = false;
 }
 
@@ -168,13 +168,18 @@ bool TextureMapToSphereFilter::Execute() {
     }
     const IGsize pointCount = points->GetNumberOfPoints();
 
-    // 1) 球心参数：默认取输入的包围盒中心
-    const auto& bounds = input->GetBoundingBox();
+    // 1) 与 vtkTextureMapToSphere 一致：自动球心为所有输入点的算术平均值。
     if (m_AutomaticCenter) {
-        const auto center = bounds.center();
-        m_Center[0] = center[0];
-        m_Center[1] = center[1];
-        m_Center[2] = center[2];
+        double sum[3] = {0.0, 0.0, 0.0};
+        for (IGsize i = 0; i < pointCount; ++i) {
+            const auto& point = points->GetPoint(i);
+            for (int axis = 0; axis < 3; ++axis) {
+                sum[axis] += static_cast<double>(point[axis]);
+            }
+        }
+        for (int axis = 0; axis < 3; ++axis) {
+            m_Center[axis] = sum[axis] / static_cast<double>(pointCount);
+        }
     }
     igDebug("TextureMapToSphereFilter: 球心 = ({}, {}, {})", m_Center[0], m_Center[1], m_Center[2]);
 

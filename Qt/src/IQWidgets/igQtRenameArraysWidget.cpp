@@ -17,9 +17,12 @@
 #include <QApplication>
 #include <QListWidget>
 #include <QListWidgetItem>
+#include <QLineEdit>
+#include <QMessageBox>
 #include <QPushButton>
 #include <QScrollBar>
 #include <QShowEvent>
+#include <QStyledItemDelegate>
 
 #include <algorithm>
 #include <set>
@@ -27,6 +30,43 @@
 #include <vector>
 
 namespace {
+
+// Inline editors share a list row's limited height. Global input padding and
+// translucent selection colors can otherwise clip text and wash out selection.
+class ArrayNameDelegate final : public QStyledItemDelegate {
+public:
+    explicit ArrayNameDelegate(QObject* parent) : QStyledItemDelegate(parent) {}
+
+    QWidget* createEditor(QWidget* parent, const QStyleOptionViewItem& option,
+                          const QModelIndex& index) const override {
+        auto* editor = qobject_cast<QLineEdit*>(QStyledItemDelegate::createEditor(parent, option, index));
+        if (!editor) { return nullptr; }
+        const bool light = option.palette.color(QPalette::Base).lightness() > 128;
+        editor->setObjectName(QStringLiteral("renameArrayEditor"));
+        editor->setFont(option.font);
+        editor->setFrame(false);
+        editor->setMinimumSize(0, 0);
+        editor->setStyleSheet(QStringLiteral(
+                "QLineEdit#renameArrayEditor { background-color: %1; color: %2;"
+                " border: 1px solid #2563EB; border-radius: 3px;"
+                " padding: 0px 5px; margin: 0px; min-height: 0px;"
+                " selection-background-color: #2563EB; selection-color: #FFFFFF; }")
+                .arg(light ? QStringLiteral("#FFFFFF") : QStringLiteral("#202938"),
+                     light ? QStringLiteral("#1F2A3A") : QStringLiteral("#F1F5F9")));
+        return editor;
+    }
+
+    void updateEditorGeometry(QWidget* editor, const QStyleOptionViewItem& option,
+                              const QModelIndex&) const override {
+        editor->setGeometry(option.rect.adjusted(2, 2, -2, -2));
+    }
+
+    QSize sizeHint(const QStyleOptionViewItem& option, const QModelIndex& index) const override {
+        QSize size = QStyledItemDelegate::sizeHint(option, index);
+        size.setHeight(std::max(size.height(), option.fontMetrics.height() + 16));
+        return size;
+    }
+};
 
 /** 把一组原名填进左右两个列表：左列只读，右列可编辑且默认等于原名 */
 void FillListPair(QListWidget* original, QListWidget* renamed, const std::vector<std::string>& names) {
@@ -49,6 +89,10 @@ void FillListPair(QListWidget* original, QListWidget* renamed, const std::vector
 igQtRenameArrays::igQtRenameArrays(igQtModelDialogWidget* modelTreeWidget, QWidget* parent)
     : QWidget(parent), ui(new Ui::RenameArraysWidget) {
     ui->setupUi(this);
+    for (auto* list : {ui->leftlistwidget, ui->rightlistwidget,
+                       ui->leftlistwidget_2, ui->rightlistwidget_2}) {
+        list->setItemDelegate(new ArrayNameDelegate(list));
+    }
 
     // 从选择的模型获得最近的模型
     m_modelTreeWidget = (modelTreeWidget != nullptr) ? modelTreeWidget : ResolveModelTreeWidget();
@@ -153,6 +197,32 @@ void igQtRenameArrays::Execute() {
     iGame::RenameArrays::Pointer filter = iGame::RenameArrays::New();
     filter->SetInput(m_currentModel);
 
+    // Validate final names, including unchanged names, within each association.
+    // The status label can be below the visible dock area; show failures in a
+    // dialog as well so a rejected rename cannot look like an unresponsive Apply.
+    const auto validateNames = [this](QListWidget* original, QListWidget* renamed, const QString& group) {
+        std::set<QString> names;
+        for (int i = 0; i < std::min(original->count(), renamed->count()); ++i) {
+            QString name = renamed->item(i)->text().trimmed();
+            if (name.isEmpty()) { name = original->item(i)->text(); }
+            if (!names.insert(name).second) {
+                const QString message = QStringLiteral("%1中存在重复的数组名“%2”。\n同一组中的数组名称必须唯一，请修改后再执行。")
+                                                .arg(group, name);
+                ui->label_Message->setText(message);
+                renamed->setCurrentRow(i);
+                renamed->scrollToItem(renamed->item(i));
+                QMessageBox::warning(this, QStringLiteral("重命名失败"), message);
+                renamed->setFocus();
+                return false;
+            }
+        }
+        return true;
+    };
+    if (!validateNames(ui->leftlistwidget, ui->rightlistwidget, QStringLiteral("点数组（Point）")) ||
+        !validateNames(ui->leftlistwidget_2, ui->rightlistwidget_2, QStringLiteral("单元数组（Cell）"))) {
+        return;
+    }
+
     // 左右列表一一对应；右侧与左侧不同才配置改名（相同/为空都跳过）
     const auto collect = [&filter](IGenum attachmentType, QListWidget* original, QListWidget* renamed) {
         const int count = std::min(original->count(), renamed->count());
@@ -167,7 +237,9 @@ void igQtRenameArrays::Execute() {
     collect(IG_CELL, ui->leftlistwidget_2, ui->rightlistwidget_2);
 
     if (!filter->Execute()) {
-        ui->label_Message->setText(QString::fromStdString(filter->GetMessage()));
+        const QString message = QString::fromStdString(filter->GetMessage());
+        ui->label_Message->setText(message);
+        QMessageBox::warning(this, QStringLiteral("重命名失败"), message);
         return;
     }
 

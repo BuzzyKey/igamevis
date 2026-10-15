@@ -159,7 +159,7 @@ bool CheckTable(iGame::DataObject::Pointer mesh, double cx, double cy, double cz
     return ok;
 }
 
-// 场景 1：默认设置（PreventSeam 开）+ 自动球心（包围盒中心 = 原点）
+// 场景 1：默认设置（PreventSeam 开）+ 自动球心（点坐标平均值 = 原点）
 bool TestDefaultSettings() {
     auto mesh = MakeOctahedron(0.0, 0.0, 0.0);
     auto filter = iGame::TextureMapToSphereFilter::New();
@@ -183,13 +183,13 @@ bool TestAutoCenterTranslated() {
     auto mesh = MakeOctahedron(2.0, -3.0, 1.0);
     bool ok = CheckTable(mesh, 0.0, 0.0, 0.0, false, true, OCTAHEDRON_SEAM_ON, 6,
                          "Test 3: auto center (mesh translated by (2, -3, 1))");
-    std::cout << "  >> confirm auto center == bounding box center" << std::endl;
+    std::cout << "  >> confirm auto center == mean of input points" << std::endl;
     auto filter = iGame::TextureMapToSphereFilter::New();
     filter->SetInput(0, mesh);
     ok &= Check(filter->Execute(), "run again to read back the center");
     const double* center = filter->GetCenter();
     ok &= Check(Near(center[0], 2.0) && Near(center[1], -3.0) && Near(center[2], 1.0),
-                "center equals the bounding box center (2, -3, 1)");
+                "center equals the point mean (2, -3, 1)");
     return ok;
 }
 
@@ -287,9 +287,12 @@ bool TestOtherMeshTypes() {
         ok &= Check(!iGame::DynamicCast<iGame::VolumeMesh>(out).IsNull(), "volume mesh: output keeps the mesh type");
         if (!tex.IsNull()) {
             ok &= Check(tex->GetNumberOfElements() == 4, "volume mesh: 4 texture coordinates");
-            // 包围盒 x:[-1,1]、y:[0,1]、z:[0,1]，中心 (0, 0.5, 0.5)
-            ok &= Check(Near(filter->GetCenter()[1], 0.5) && Near(filter->GetCenter()[2], 0.5),
-                        "volume mesh: center = bounding box center");
+            // 回归：非均匀点分布下，包围盒中心与 ParaView 的点均值不同，导致 UV 错位。
+            // 四点均值为 (0,0.25,0.25)，必须区别于包围盒中心 (0,0.5,0.5)。
+            // 修复提交：待提交。
+            ok &= Check(Near(filter->GetCenter()[0], 0.0) &&
+                        Near(filter->GetCenter()[1], 0.25) && Near(filter->GetCenter()[2], 0.25),
+                        "volume mesh: center = mean of all input points");
         }
     }
 

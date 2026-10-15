@@ -17,12 +17,12 @@ public:
     I_OBJECT(TextureMapToSphereFilter);
     static Pointer New() { return new TextureMapToSphereFilter; }
 
-    /* 球心参数：显式指定球心（调用后不再自动取包围盒中心） */
+    /* 球心参数：显式指定球心（调用后不再自动计算点坐标平均值） */
     void SetCenter(double x, double y, double z);
     void SetCenter(const double center[3]);
     const double* GetCenter() const { return m_Center; }
 
-    /* true：忽略 SetCenter() 设置的球心，改用输入包围盒中心（默认 true） */
+    /* true：忽略 SetCenter() 设置的球心，改用所有输入点坐标的平均值（默认 true） */
     void SetAutomaticCenter(bool value) { m_AutomaticCenter = value; }
     bool GetAutomaticCenter() const { return m_AutomaticCenter; }
 

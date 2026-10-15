@@ -7053,8 +7053,17 @@ void igQtMainWindow::initAllFilters() {
             return;
         }
 
-        // 输入框默认值 = 当前模型的包围盒中心（勾上“自动”就用它当球心）
-        const auto center = data->GetBoundingBox().center();
+        // 默认值与算法的自动球心一致：所有输入点的坐标平均值。
+        double center[3] = {0.0, 0.0, 0.0};
+        auto spherePoints = data->GetPoints();
+        const IGsize spherePointCount = spherePoints->GetNumberOfPoints();
+        for (IGsize i = 0; i < spherePointCount; ++i) {
+            const auto& point = spherePoints->GetPoint(i);
+            for (int axis = 0; axis < 3; ++axis) { center[axis] += static_cast<double>(point[axis]); }
+        }
+        if (spherePointCount > 0) {
+            for (double& value : center) { value /= static_cast<double>(spherePointCount); }
+        }
         const QString defaultX = QString::number(center[0], 'g', 6);
         const QString defaultY = QString::number(center[1], 'g', 6);
         const QString defaultZ = QString::number(center[2], 'g', 6);
@@ -7062,7 +7071,7 @@ void igQtMainWindow::initAllFilters() {
         igQtFilterDialogDockWidget* dialog = new igQtFilterDialogDockWidget(this, true);
         dialog->setFilterTitle(QStringLiteral("球面纹理坐标 (Texture Map To Sphere)"));
         int autoCenterId = dialog->addParameter(igQtFilterDialogDockWidget::QT_CHECK_BOX,
-                                                QStringLiteral("自动使用包围盒中心"), "true");
+                                                QStringLiteral("自动使用点坐标平均值"), "true");
         int centerXId = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT, QStringLiteral("球心 X"),
                                              defaultX);
         int centerYId = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT, QStringLiteral("球心 Y"),

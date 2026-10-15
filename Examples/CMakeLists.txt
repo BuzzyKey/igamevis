@@ -724,6 +724,7 @@ igame_add_example(testTextureMapToCylinder Filter/TestTextureMapToCylinder.cpp)
 igame_add_example(testPerlinNoise Filter/AttributeManipulation/TestPerlinNoise.cpp)
 
 igame_add_example(testTextureMapToSphere Filter/TextureMapToSphere/TestTextureMapToSphere.cpp)
+igame_add_example(testResampleWithDataSet Filter/TestResampleWithDataSet.cpp)
 
 get_property(IGAME_EXAMPLE_TARGETS DIRECTORY PROPERTY IGAME_EXAMPLE_TARGETS)
 if (NOT IGAME_EXAMPLE_TARGETS)

@@ -365,6 +365,43 @@ void TestErrorPaths() {
     Check(!filter2->GetMessage().empty(), "失败时给出消息：" + filter2->GetMessage());
 }
 
+// Bug: ordinary hexahedra used polyhedral MVC, making StreamTest-to-plane
+// sampling slow and producing different values from trilinear interpolation.
+// An off-center xyz field distinguishes these bases; outside/face probes
+// protect containment. Fix commit: pending (not yet committed).
+void TestTrilinearHexahedron() {
+    auto mesh = MakeUnitHexahedron();
+    if (!mesh) { return; }
+    auto values = iGame::FloatArray::New();
+    values->SetName("xyz");
+    values->SetDimension(1);
+    values->Resize(8);
+    for (int i = 0; i < 8; ++i) {
+        const auto& p = mesh->GetPoint(i);
+        values->SetValue(i, p[0] * p[1] * p[2]);
+    }
+    mesh->GetAttributeSet()->AddScalar(IG_POINT, values);
+    auto probe = iGame::PointSet::New();
+    probe->AddPoint(iGame::Point(.2f, .3f, .4f));
+    probe->AddPoint(iGame::Point(1.f, .3f, .4f));
+    probe->AddPoint(iGame::Point(1.0005f, .3f, .4f));
+    auto filter = iGame::ResampleWithDataSet::New();
+    filter->SetSourceData(mesh);
+    filter->SetProbeData(probe);
+    Check(filter->Execute(), "trilinear hex execution");
+    auto output = filter->GetResampledData();
+    if (!output) { return; }
+    auto result = FindPointArray(output->GetAttributeSet(), "xyz", nullptr);
+    Check(result != nullptr, "trilinear xyz array");
+    if (result) {
+        CheckNear(result->GetElementValue(0, 0), .024, 1e-6, "off-center xyz reproduction");
+        CheckNear(result->GetElementValue(1, 0), .12, 1e-6, "face xyz reproduction");
+        CheckNear(result->GetElementValue(2, 0), 0., 1e-6, "outside value cleared");
+    }
+    const auto& mask = filter->GetSampleValidMask();
+    Check(mask.size() == 3 && mask[0] && mask[1] && !mask[2], "hex containment including outside point");
+}
+
 } // namespace
 
 int main() {
@@ -381,6 +418,7 @@ int main() {
     TestPointCloudProbe();
     TestSnappingRadius();
     TestErrorPaths();
+    TestTrilinearHexahedron();
 
     std::cout << "\n==== 结果：" << (g_Failed == 0 ? "全部通过" : std::to_string(g_Failed) + " 项失败") << " ===="
               << std::endl;

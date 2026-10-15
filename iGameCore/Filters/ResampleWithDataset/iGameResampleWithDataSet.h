@@ -53,7 +53,7 @@ IGAME_NAMESPACE_BEGIN
  *     该采样点记为有效。对应 vtkProbeFilter 的 SnappingRadius；本实现不移动采样点坐标。
  *
  * 单元类型与插值方式沿用 ResampleToLine 的内核：线性面单元用线性插值（重心坐标 / 双线性 /
- * 扇形三角化），体单元用均值坐标（Mean Value Coordinates），二次/高次单元用二次形函数 +
+ * 扇形三角化），八节点六面体用三线性形函数，其他体单元用均值坐标（Mean Value Coordinates），二次/高次单元用二次形函数 +
  * 参数坐标 Newton 反解；未覆盖的高次单元退化为角点线性处理，并在 GetMessage() 中提示数量。
  */
 class ResampleWithDataSet : public Filter {
