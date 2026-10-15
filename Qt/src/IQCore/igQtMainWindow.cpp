@@ -4508,23 +4508,15 @@ void igQtMainWindow::initAllFilters() {
     // 使用代理 QAction 避免改动标准菜单中 QAction 的文字、位置或连接。
     QMenu* developingFilters = ui->menu_filters->addMenu(QStringLiteral("开发中filter"));
     developingFilters->setObjectName(QStringLiteral("menu_developing_filters"));
-    connect(developingFilters->addAction(QStringLiteral("平面插值采样 (Plane Sampling)")), &QAction::triggered, this,
-            [this](bool) {
-                auto currentModel = rendererWidget->GetScene()->GetCurrentModel();
-                if (!currentModel) {
-                    showDarkFramelessMessage(QStringLiteral("提示"), QStringLiteral("请先加载一个模型"));
-                    return;
-                }
-
-    
-    QAction* cellMeshMetrics = ui->menu_filters->addAction(QStringLiteral("单元质量评估 (Cell Quality)"));
+    QAction* cellMeshMetrics = developingFilters->addAction(QStringLiteral("单元质量评估 (Cell Quality)"));
     connect(cellMeshMetrics, &QAction::triggered, this, [&](bool checked) {
         // 1. 创建对话框
         igQtFilterDialogDockWidget* dialog = new igQtFilterDialogDockWidget(this, true);
         dialog->setFilterTitle(QStringLiteral("单元质量评估 (Cell Quality)"));
         dialog->setFilterDescription(
                 QStringLiteral("对齐 ParaView Cell Quality：选择一个统一指标作用于模型内所有单元；\n"
-                               "不适用的单元填入「不支持值」，执行后汇总报告跳过数量。"));
+                               "不适用的单元填入「不支持值」，执行后汇总报告跳过数量。\n"
+                               "适用范围：四面体、六面体单元；三角形、四边形等面单元会被跳过。"));
 
         // 2. 统一指标下拉框（与 ParaView 一致的交互，不再区分四面体/六面体专用算法）
         std::vector<QString> metricNames = {
@@ -4641,9 +4633,21 @@ void igQtMainWindow::initAllFilters() {
                                      .arg(skipped)
                                      .arg(QString::fromStdString(qualityObj->GetName()));
             if (supported == 0 && unsupported > 0) {
-                report += QStringLiteral("\n\n提示：当前指标对模型中的所有单元均不适用，请更换评估指标或模型（四面体/六面体）。");
+                report += QStringLiteral(
+                        "\n\n提示：当前指标对模型中的所有单元均不适用。"
+                        "本功能仅支持四面体 / 六面体单元，请确认模型为体网格，或更换评估指标。");
             }
             showDarkFramelessMessage(QStringLiteral("评估完成"), report, true);
+        });
+    });
+    connect(developingFilters->addAction(QStringLiteral("平面插值采样 (Plane Sampling)")), &QAction::triggered, this,
+            [this](bool) {
+                auto currentModel = rendererWidget->GetScene()->GetCurrentModel();
+                if (!currentModel) {
+                    showDarkFramelessMessage(QStringLiteral("提示"), QStringLiteral("请先加载一个模型"));
+                    return;
+                }
+
                 auto obj = currentModel->GetDataObject();
                 if (!obj) {
                     showDarkFramelessMessage(QStringLiteral("提示"), QStringLiteral("当前模型没有有效数据"));
@@ -5250,10 +5254,6 @@ void igQtMainWindow::initAllFilters() {
             developingFilters->actions().last()->setData(QString::fromLatin1(entry.id));
         }
     }
-    QAction* cellMetricsDevelopment = developingFilters->addAction(
-            QStringLiteral("单元网格指标 (CellMeshMetrics)"));
-    cellMetricsDevelopment->setData(QStringLiteral("cell_mesh_metrics"));
-
     auto bindDevelopmentAction = [this, developingFilters](const char* id, std::function<void()> run) {
         const QString filterId = QString::fromLatin1(id);
         for (QAction* action : developingFilters->findChildren<QAction*>()) {
@@ -5522,9 +5522,6 @@ void igQtMainWindow::initAllFilters() {
 
     bindDevelopmentAction("ghost_cells", [executeDevelopmentFilter]() {
         executeDevelopmentFilter(QStringLiteral("Ghost 单元标记"), GhostCellFilter::New());
-    });
-    bindDevelopmentAction("cell_mesh_metrics", [executeDevelopmentFilter]() {
-        executeDevelopmentFilter(QStringLiteral("单元网格指标"), CellMeshMetricsFilter::New());
     });
     bindDevelopmentAction("axis_aligned_reflection", [this]() {
         auto scene = rendererWidget->GetScene();
@@ -6870,6 +6867,7 @@ void igQtMainWindow::initAllFilters() {
                                                .arg(QString::fromStdString(groupName))
                                                .arg(blockList);
                 showDarkFramelessMessage(QStringLiteral("合并数据集"), report, true);
+            });
     // ---------- Perlin 噪声 (Perlin Noise)：追加在“新增filter/第二批”菜单末尾 ----------
     connect(developingFiltersBatch2->addAction(QStringLiteral("Perlin 噪声 (Perlin Noise)")),
             &QAction::triggered, this, [this](bool) {
