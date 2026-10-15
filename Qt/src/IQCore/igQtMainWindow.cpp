@@ -6865,6 +6865,8 @@ void igQtMainWindow::initAllFilters() {
                                                .arg(QString::fromStdString(groupName))
                                                .arg(blockList);
                 showDarkFramelessMessage(QStringLiteral("合并数据集"), report, true);
+            });
+
     // ---------- Perlin 噪声 (Perlin Noise)：追加在“新增filter/第二批”菜单末尾 ----------
     connect(developingFiltersBatch2->addAction(QStringLiteral("Perlin 噪声 (Perlin Noise)")),
             &QAction::triggered, this, [this](bool) {
