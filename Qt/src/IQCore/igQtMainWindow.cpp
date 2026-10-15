@@ -5621,8 +5621,16 @@ void igQtMainWindow::initAllFilters() {
             showDarkFramelessMessage(QStringLiteral("Warning"), QString::fromStdString(message));
             return;
         }
-        // arc_length 是点属性：刷新模型树，并把该属性挂到当前属性上（点集 / 网格都适用）
-        modelTreeWidget->updateAllAttriubute(data);
+        // Register a distinct pipeline result, retaining the original source model.
+        auto sourceItem = modelTreeWidget->getItemFromObject(data);
+        data = filter->GetOutput();
+        static int polylineLengthNumber = 0;
+        const QString outputName = QStringLiteral("PolylineLength%1").arg(++polylineLengthNumber);
+        data->SetName(outputName.toStdString());
+        const int outputModelId = modelTreeWidget->addDataObjectToModelTree(data, ItemSource::Algorithm);
+        modelTreeWidget->renameModelRow(data, outputName);
+        model = scene->GetModelById(outputModelId);
+        if (sourceItem) { sourceItem->changeVisibility(false); }
         auto attributeSet = data->GetAttributeSet();
         int attrIndex = attributeSet ? attributeSet->GetAttributeIndex(AppendArcLengthFilter::GetArrayName()) : -1;
         IGsize valueCount = 0;
@@ -5631,15 +5639,17 @@ void igQtMainWindow::initAllFilters() {
             if (attribute.pointer) { valueCount = attribute.pointer->GetNumberOfValues(); }
         }
         auto item = modelTreeWidget->getItemFromObject(data);
-        if (item && attrIndex >= 0 && attrIndex < item->childCount()) {
+        if (item && attrIndex >= 0) {
             item->setExpanded(true);
-            auto child = item->child(attrIndex);
-            if (child) {
+            for (int i = 0; i < item->childCount(); ++i) {
+                auto child = dynamic_cast<AttribTreeWidgetItem*>(item->child(i));
+                if (!child || child->attributeIndex() != attrIndex) { continue; }
                 item->setCurrentChild(child);
                 item->setSelected(false);
                 item->viewAttribute(attrIndex, -1);
                 child->setSelected(true);
                 modelTreeWidget->setCurrentItem(child);
+                break;
             }
         }
         if (ui->dockWidget_SearchInfo && ui->dockWidget_SearchInfo->isVisible()) {

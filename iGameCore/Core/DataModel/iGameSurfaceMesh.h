@@ -35,6 +35,9 @@ public:
 	// Whether the edge array was derived from the faces by BuildEdges() (it overwrites m_Edges there).
 	// false means the edges were set explicitly, e.g. the LINES section of a legacy VTK POLYDATA.
 	bool AreEdgesDerivedFromFaces() const noexcept { return m_FaceEdges != nullptr; }
+    bool HasExplicitLineCells() const override {
+        return GetDataObjectType() == IG_SURFACE_MESH && !AreEdgesDerivedFromFaces() && GetNumberOfEdges() > 0;
+    }
 	// Get face array
 	CellArray* GetFaces();
     virtual CellArray::Pointer GetCellArray() override { return m_Faces; }

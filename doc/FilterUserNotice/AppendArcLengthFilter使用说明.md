@@ -12,8 +12,8 @@
 - 折线之间共享点时**按遍历顺序后者覆盖前者**，与 VTK `vtkAppendArcLength`
   （"cells must not share points" 只是警告）的实际覆盖行为一致；
 - 未参与折线的点（只属于三角形/四面体/顶点等单元，或完全孤立）保持 0；
-- 输出即输入本身：`GetOutput()` 与输入是同一个 `DataObject`，`arc_length` 存在同名数组时**原地替换**
-  （数组对象、挂载位置、类型不变，因此色带/显示属性不会丢），否则新增。
+- 输出是**独立的结果模型**：复制原始点坐标、连通性和已有属性，输入模型保持不变。
+  输出中的同名点数组 `arc_length` 被替换，同名单元数组仍保留；重复执行不会堆积同名点数组。
 
 `arc_length[p]` = 沿该点所在的折线，从折线首点走到 `p` 的各段欧氏距离之和（累加用 double，落盘时再截为
 float32）。
@@ -51,22 +51,24 @@ filter->SetInput(input);                          // PointSet 及其子类
 if (filter->Execute()) {
     const char* name = iGame::AppendArcLengthFilter::GetArrayName();   // "arc_length"
     IGsize lines = filter->GetNumberOfProcessedLines();
-    // input 上已新增/替换 arc_length 点属性
+    // filter->GetOutput() 上新增/替换 arc_length 点属性；input 不变
 } else {
     const std::string& why = filter->GetMessage();
 }
 ```
 
-Qt 入口：菜单 **Filters（过滤器）→ 追加弧长 (AppendArcLength)**。无参数，直接作用于当前模型：
-成功后刷新模型树并选中 `arc_length`，提示 `Arc length appended: N point(s), M polyline(s).`
+Qt 入口：菜单 **新增filter → 第二批 → 追加弧长 (AppendArcLength)**。无参数：
+成功后在模型树注册新的 `PolylineLength1` / `PolylineLength2` 等结果模型，并选中其 `arc_length`，
+提示 `Arc length appended: N point(s), M polyline(s).`
 
 ## 使用示例
 
 ### 1. GUI（iGameVis）
 
 1. 打开折线模型（例如 `Examples/Models/AppendArcLength_test.vtk`，或任意含 `LINES` / `POLYLINES` 的 `.vtk` / `.vtp`）；
-2. 菜单 **Filters → 追加弧长 (AppendArcLength)**（**无参数面板**，点一下直接执行）；
-3. 输出模型自动进入模型树，并自动把 `arc_length` 设为当前数组，直接看到沿折线的渐变着色。
+2. 菜单 **新增filter → 第二批 → 追加弧长 (AppendArcLength)**（**无参数面板**，点一下直接执行）；
+3. 独立输出模型自动进入模型树，并把 `arc_length` 设为当前数组。模型信息的 **数据数组 (Data Arrays)**
+   区域显示数组名、点/单元挂载位置、分量数、项数和范围。
 
 ### 2. 核心库（C++）
 
@@ -76,7 +78,7 @@ filter->SetInput(mesh);                    // 含折线单元的 PointSet / Mesh
 // 输出数组名固定为 arc_length（AppendArcLengthFilter::GetArrayName()），没有 setter；
 // 非折线输入时该列全为 0，与 VTK 对不含 lines 的 vtkPolyData 一致。
 filter->Execute();
-iGame::DataObject::Pointer out = filter->GetOutput(0);   // 点属性多出一列 double 的 arc_length
+iGame::DataObject::Pointer out = filter->GetOutput(0);   // 独立模型，点属性多出一列 float32 的 arc_length
 ```
 
 ### 3. 测试程序
@@ -119,13 +121,13 @@ iGame::DataObject::Pointer out = filter->GetOutput(0);   // 点属性多出一�
 ```text
 0:#000 0   1:(1,0,0) 9.48683262   2:(1,2,0) 3   3:#000 0
 4:(1,1,0) 1.41421354   5:(2,1,0) 2.41421366   6:(3,1,0) 3.41421366
-7:(5,5,5) 0   8:(-1,0,0) 0   9:(-1,-1,0) 0   10:(10,0,0) 0   11:(10,0,3) 9.48683262
+7:(5,5,5) 0   8:(-1,0,0) 0   9:(-1,-1,0) 0   10:(10,0,0) 0   11:(10,0,3) 3
 ```
 
 - 折线 `(0,1,2)`：点 2 得 `|1-0| + |2-1| = 1 + 2 = 3`；
 - 折线 `(3,4,5,6)`：`√2 ≈ 1.41421354`、`+1 ≈ 2.41421366`、`+1 ≈ 3.41421366`；
-- 折线 `(10,11)` 先把点 11 写成 `3`，随后折线 `(11,1)` 再把点 11 与点 1 一起覆盖为
-  `|(1,0,0)-(10,0,3)| = √90 ≈ 9.48683262`（VTK 实测同样的 `9.48683262`）。
+- 折线 `(10,11)` 先把点 11 写成 `3`；随后折线 `(11,1)` 的首点 11 保持 `3`，只把点 1 覆盖为
+  `|(1,0,0)-(10,0,3)| = √90 ≈ 9.48683262`，与已有 ParaView 参考 CSV 一致。
 
 重复执行：同名数组只保留 1 条（实测 `same-name arrays = 1`），值、折线数与首次执行相同。
 
@@ -239,3 +241,46 @@ legacy `.vtk` `POLYDATA` 的 `LINES` 段由 `VTKAbstractReader::CreateCellArray(
 | 修复后 | `[0 1 2]`、`[3 4 5 6]`、`[10 11]`、`[11 1]` | 12 / 12 位级一致 |
 
 顶点数一致的段（例如全部 2 点线、全部 4 点四边形）本来就正确，所以该缺陷此前未被发现。
+
+## 2026-10-14 回归修复（待提交）
+
+用户反馈 `arc_length_lines.vtk` 在 ParaView 中统计有 12 个点，但点表示只看见 8 个位置。
+文件的 4 条折线引用 9 个点 ID（0/1/2/3/4/5/6/10/11），其中点 0 与点 3 坐标重合；
+点 7/8/9 是孤立点。现在保留所有 12 个点和全部点属性，折线点表示只绘制被单元引用的点，
+因此点数统计与可见位置数分别为 12 与 8。纯点集的点绘制不受影响。纯折线文件默认显示线框。
+
+此次还将过滤器从原地追加改为独立输出，并补充模型信息的 Data Arrays 区域。
+输出模型进入树后隐藏源模型的显示，源模型仍留在树中，可重新打开显示。
+无窗口回归检查 **39 / 39 通过**：覆盖源模型不变、输出 ID 独立、共享点值、孤立点绘制索引、
+表示切换、同名点/单元数组、整数属性继承、无折线输入、失败清除旧输出以及 2000 点长折线。
+使用实际用户文件检查：
+
+```powershell
+.\build-msvc\Release\testAppendArcLengthChecks.exe --no-pause --lines-model D:\iGame\pvcompare\arc_length_models\arc_length_lines.vtk
+```
+
+界面可视化验证由用户执行：打开该文件，确认统计为 12 点/4 条折线；切换到点表示，
+确认 8 个可见位置；运行追加弧长，确认新 `PolylineLengthN` 模型、原模型不增加新属性、
+结果的 `arc_length` 为点标量、12 项、范围约 `[0, 9.48683262]`。
+
+## 2026-10-15 混合 Surface 显示修复（待提交）
+
+`arc_length_lines_and_polygons.vtk` 同时包含折线和三角形。此前 Surface 只绘制三角形，
+Surface+Wireframe 又进入三角形单通道线框路径，导致独立折线不显示。
+现在 Surface 同时绘制填充三角形和显式折线；增加 Wireframe 时再显示三角形边界，
+关闭 Wireframe 后仍保留 Surface 中的折线。纯面网格继续使用原来的单通道线框优化。
+折线与三角形边界的组合只发生在绘制索引中，不改变原始 LINES 单元或弧长计算。
+
+检查覆盖原始混合模型和追加弧长输出、Surface/Surface+Wireframe/Points 切换、
+远程渲染的线索引准备以及纯面网格回归。检查 CPU 数据和绘制分支，不创建 GL 上下文；
+实际可视化仍由用户验证。
+
+构建 `iGameCore` / `Qt_module` / `iGameVis` / `testAppendArcLengthChecks` 成功；
+使用原始纯折线文件和实际混合文件运行检查，**50 / 50 通过**。
+
+```powershell
+.\build-msvc\Release\testAppendArcLengthChecks.exe --no-pause --mixed-model D:\iGame\pvcompare\arc_length_models\arc_length_lines_and_polygons.vtk
+```
+
+手工检查：重新打开第二个模型，只勾选 Surface，应看到填充三角形和全部 4 条折线；
+勾选 Wireframe 时三角形轮廓也应出现；运行追加弧长后重复检查新输出模型。

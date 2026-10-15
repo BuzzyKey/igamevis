@@ -15,7 +15,7 @@ IGAME_NAMESPACE_BEGIN
  * @brief 为折线（一维线单元）各点累计弧长，语义对齐 VTK `vtkAppendArcLength`。
  *
  * 与 `vtkAppendArcLength::RequestData` 逐项对齐的语义：
- *  - 输出一个新点标量属性 "arc_length"（维数 1），元素数 = 输入点数，初值 0；
+ *  - 输出独立模型，保留输入几何及属性，并追加点标量 "arc_length"（维数 1），元素数 = 输入点数，初值 0；
  *  - 只遍历线 / 折线单元（IG_LINE、IG_POLY_LINE，对应 `vtkPolyData::GetLines()`）：
  *    沿单元的顶点顺序累加相邻点的距离，折线第 k 个顶点写入"从起点到该顶点的累计弧长"，
  *    折线首顶点保持原值（通常为 0）；

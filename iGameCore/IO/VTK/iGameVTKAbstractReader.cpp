@@ -1019,6 +1019,11 @@ bool VTKAbstractReader::ReadSurfaceMesh() {
             //return false;
         }
     }
+    // A LINES-only POLYDATA has no triangles to fill. Show its polylines
+    // immediately; retain the full POINTS array, including unreferenced points.
+    if (m_SurfaceMesh->GetNumberOfFaces() == 0 && m_SurfaceMesh->GetNumberOfEdges() > 0) {
+        m_SurfaceMesh->SetViewStyle(IG_WIREFRAME);
+    }
     return true;
 }
 bool VTKAbstractReader::ReadStructuredGrid() {

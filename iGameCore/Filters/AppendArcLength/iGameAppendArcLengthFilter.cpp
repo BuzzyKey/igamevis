@@ -1,10 +1,80 @@
 #include "iGameAppendArcLengthFilter.h"
 
 #include "iGameCell.h"
+#include "iGameStructuredMesh.h"
 
 #include <algorithm>
 
 IGAME_NAMESPACE_BEGIN
+
+namespace
+{
+ArrayObject::Pointer CopyArray(ArrayObject::Pointer source) {
+#define COPY_ARRAY(Type)                                                                                               \
+    if (auto array = DynamicCast<Type>(source)) {                                                                      \
+        auto copy = Type::New();                                                                                       \
+        copy->DeepCopy(array);                                                                                         \
+        copy->SetName(source->GetName());                                                                              \
+        return copy;                                                                                                   \
+    }
+    COPY_ARRAY(FloatArray)
+    COPY_ARRAY(DoubleArray)
+    COPY_ARRAY(IntArray)
+    COPY_ARRAY(UnsignedIntArray)
+    COPY_ARRAY(LongLongArray)
+    COPY_ARRAY(UnsignedLongLongArray)
+    COPY_ARRAY(CharArray)
+    COPY_ARRAY(UnsignedCharArray)
+    COPY_ARRAY(ShortArray)
+    COPY_ARRAY(UnsignedShortArray)
+#undef COPY_ARRAY
+    return nullptr;
+}
+
+CellArray::Pointer CopyCells(CellArray* source) {
+    if (!source) { return nullptr; }
+    auto copy = CellArray::New();
+    copy->DeepCopy(source);
+    return copy;
+}
+
+// Geometry and attributes belong to a new pipeline result. In particular, keep
+// explicit POLYDATA LINES: SurfaceMesh::DeepCopy currently copies only faces.
+PointSet::Pointer CopyGeometry(PointSet::Pointer source) {
+    auto result = DynamicCast<PointSet>(DataObject::CreateDataObject(source->GetDataObjectType()));
+    if (!result) { return nullptr; }
+    auto points = Points::New();
+    points->DeepCopy(source->GetPoints());
+    result->SetPoints(points);
+    if (auto mesh = DynamicCast<UnstructuredMesh>(source)) {
+        auto types = UnsignedIntArray::New();
+        if (mesh->GetCellTypes()) { types->DeepCopy(mesh->GetCellTypes()); }
+        DynamicCast<UnstructuredMesh>(result)->SetCells(CopyCells(mesh->GetCells().get()), types);
+    } else if (auto mesh = DynamicCast<StructuredMesh>(source)) {
+        auto output = DynamicCast<StructuredMesh>(result);
+        output->SetDimensionSize(mesh->GetDimensionSize());
+        output->GenStructuredCellConnectivities();
+    } else if (auto mesh = DynamicCast<VolumeMesh>(source)) {
+        auto output = DynamicCast<VolumeMesh>(result);
+        if (mesh->GetIsPolyhedronType()) {
+            output->InitVolumesWithPolyhedron(CopyCells(mesh->GetFaces()), CopyCells(mesh->GetVolumeFaces()));
+        } else {
+            output->SetVolumes(CopyCells(mesh->GetVolumes()));
+        }
+    } else if (auto mesh = DynamicCast<SurfaceMesh>(source)) {
+        auto output = DynamicCast<SurfaceMesh>(result);
+        output->SetFaces(CopyCells(mesh->GetFaces()));
+        // Derived edges can be rebuilt from faces; copying them as explicit
+        // edges would incorrectly turn a face-only mesh into an arc-length source.
+        if (!mesh->AreEdgesDerivedFromFaces()) { output->SetEdges(CopyCells(mesh->GetEdges())); }
+    }
+    result->SetViewStyle(static_cast<IGenum>(source->GetViewStyle()));
+    result->SetPointSize(source->GetPointSize());
+    result->SetLineWidth(source->GetLineWidth());
+    result->SetName("PolylineLength");
+    return result;
+}
+} // namespace
 
 AppendArcLengthFilter::AppendArcLengthFilter() {
     SetNumberOfInputs(1);
@@ -14,6 +84,7 @@ AppendArcLengthFilter::AppendArcLengthFilter() {
 bool AppendArcLengthFilter::Execute() {
     m_Message.clear();
     m_LineCount = 0;
+    SetOutput(0, nullptr);
 
     if (!m_Inputs || m_Inputs->GetNumberOfElements() == 0) {
         m_Message = "没有输入数据，请先加载模型。";
@@ -31,7 +102,7 @@ bool AppendArcLengthFilter::Execute() {
     if (!pointSet) {
         m_Message = "不支持的数据类型，请使用点集及其派生网格（PointSet / SurfaceMesh / VolumeMesh / "
                     "UnstructuredMesh / StructuredMesh）。";
-        igError("AppendArcLengthFilter: unsupported data type {}", (int)input->GetDataObjectType());
+        igError("AppendArcLengthFilter: unsupported data type {}", (int) input->GetDataObjectType());
         return false;
     }
     Points::Pointer points = pointSet->GetPoints();
@@ -88,7 +159,9 @@ bool AppendArcLengthFilter::Execute() {
             // 用返回内部指针的重载，零拷贝且不受单元点数上限限制。
             const igIndex* pointIds = nullptr;
             const int vcnt = lineCells->GetCellIds(cid, pointIds);
-            if (vcnt < 2 || pointIds == nullptr) { continue; } // 空单元 / 单点单元不产生弧长（与 VTK numCellPoints==0 分支等价）
+            if (vcnt < 2 || pointIds == nullptr) {
+                continue;
+            } // 空单元 / 单点单元不产生弧长（与 VTK numCellPoints==0 分支等价）
 
             double arcDistance = 0.0;
             for (int k = 1; k < vcnt; ++k) {
@@ -107,29 +180,38 @@ bool AppendArcLengthFilter::Execute() {
         }
     }
 
-    AttributeSet* attributeSet = input->GetAttributeSet();
-    if (!attributeSet) {
-        m_Message = "输入没有属性集，无法写入 arc_length。";
-        igError("AppendArcLengthFilter: input has no attribute set");
+    auto result = CopyGeometry(pointSet);
+    if (!result) {
+        m_Message = "无法为此数据类型创建追加弧长的输出模型。";
         return false;
     }
-    const int existing = attributeSet->GetAttributeIndex(GetArrayName());
-    if (existing >= 0) {
-        // 与 vtkFieldData::AddArray 的同名覆盖一致；这里直接替换属性指针而不 DeleteAttribute，
-        // 避免留下 isDeleted 的空指针槽（渲染路径按索引遍历会解引用空指针）
-        auto& attribute = attributeSet->GetAttribute(existing);
-        attribute.SetPointer(arcLength);
-        attribute.SetType(IG_SCALAR);
-        attribute.SetAttachmentType(IG_POINT);
-        attribute.SetDataRange(nullptr);
-    } else {
-        attributeSet->AddAttribute(IG_SCALAR, IG_POINT, arcLength);
+    auto attributes = AttributeSet::New();
+    if (auto inputAttributes = input->GetAttributeSet()) {
+        for (IGsize i = 0; i < inputAttributes->GetNumberOfAttributes(); ++i) {
+            const auto& source = inputAttributes->GetAttribute(i);
+            if (source.isDeleted || !source.pointer) { continue; }
+            if (source.attachmentType == IG_POINT && source.pointer->GetName() == GetArrayName()) { continue; }
+            auto copy = source;
+            copy.pointer = CopyArray(source.pointer);
+            if (!copy.pointer) {
+                m_Message = "无法复制输入属性：" + source.pointer->GetName();
+                return false;
+            }
+            if (source.dataRange) {
+                copy.dataRange = DoubleArray::New();
+                copy.dataRange->DeepCopy(source.dataRange);
+            }
+            const IGsize index = attributes->AddAttribute(copy.type, copy.attachmentType, copy.pointer, copy.dataRange);
+            attributes->GetAttribute(index) = copy;
+        }
     }
+    attributes->AddScalar(IG_POINT, arcLength);
+    result->SetAttributeSet(attributes);
+    result->Modified();
 
-    this->SetOutput(0, input);
+    this->SetOutput(0, result);
     UpdateProgress(1.0);
-    igDebug("AppendArcLengthFilter: points = {}, polylines = {}, array = {}", numPoints, m_LineCount,
-            GetArrayName());
+    igDebug("AppendArcLengthFilter: points = {}, polylines = {}, array = {}", numPoints, m_LineCount, GetArrayName());
     return true;
 }
 
