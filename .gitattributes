@@ -41,3 +41,4 @@ Examples/Models/TextureMapToCylinder_loose_line.vtk -filter -diff -merge text
 Examples/Models/PerlinNoise_Test.vtk -filter -diff -merge text
 Examples/Models/YieldCriteria_Test.vtk -filter -diff -merge text
 Examples/Models/ResampleCubeVector.vtk -filter -diff -merge text
+Examples/Models/TextureMapSphere.vtk -filter -diff -merge text
