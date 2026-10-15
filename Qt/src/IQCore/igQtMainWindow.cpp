@@ -3811,7 +3811,7 @@ void igQtMainWindow::initAllFilters() {
         }
     });
 
-    connect(mesh_processing->addAction(QStringLiteral("Surface Extraction（表面提取）")), &QAction::triggered, this, [&](bool checked) {
+    connect(mesh_processing->addAction(QStringLiteral("表面提取 (Extract Surface)")), &QAction::triggered, this, [&](bool checked) {
         if (rendererWidget->GetScene()->GetCurrentModel() == nullptr) return;
         auto obj = rendererWidget->GetScene()->GetCurrentModel()->GetDataObject();
         if (!obj) return;
@@ -5098,7 +5098,7 @@ void igQtMainWindow::initAllFilters() {
         {"transform", "通用几何变换 (Transform)"},
         {"cell_size", "计算单元尺寸 (ComputeCellSize)"},
         {"boundary_mesh_quality", "边界网格质量 (Boundary Mesh Quality)"},
-        {"multiblock_surface_as_multiblock", "多块模型表面提取"},
+        {"multiblock_surface_as_multiblock", "多块模型表面提取 (Extract Surface)"},
         {"feature_edges_region_ids", "特征区域Id (FeatureEdgeRegion id)"},
         {"append_location_attributes", "附加点坐标到属性(AppendLocaitonAttribute)"},
         {"pass_arrays", "传递过滤数据数组 (Pass Arrays)"},
@@ -6046,8 +6046,8 @@ void igQtMainWindow::initAllFilters() {
             QStringLiteral("Surface Triangulation（表面三角化）")),
             QStringLiteral("表面三角化 (Surface Triangulation)"));
     addDevelopmentAction(developingData, approvedMenuAction(mesh_processing,
-            QStringLiteral("Surface Extraction（表面提取）")),
-            QStringLiteral("表面提取 (Surface Extraction)"));
+            QStringLiteral("表面提取 (Extract Surface)")),
+            QStringLiteral("表面提取 (Extract Surface)"));
     addDevelopmentAction(developingData, approvedFilter("force_static_mesh"),
             QStringLiteral("强制静态网格 (Force Static Mesh)"));
     auto forceStaticDevelopmentFilter = ForceStaticMeshFilter::New();
