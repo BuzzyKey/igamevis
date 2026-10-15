@@ -575,6 +575,7 @@ bool TestInputNotModified() {
     for (IGsize i = 0; i < 3; i++) { pressure->SetValue(i, static_cast<double>(i) + 1.0); }
     mesh->GetAttributeSet()->AddScalar(IG_POINT, pressure);
 
+
     auto filter = iGame::GenerateSurfaceTangentsFilter::New();
     filter->SetInput(0, mesh);
     if (!Check(filter->Execute(), "filter Execute()")) { return false; }
