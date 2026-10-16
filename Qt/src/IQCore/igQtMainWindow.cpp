@@ -6606,8 +6606,6 @@ void igQtMainWindow::initAllFilters() {
     });
     addDevelopmentAction(developingFilters, tetraAction,
                          QStringLiteral("四面体化(Mesh Tetrahedralize)"));
-    addDevelopmentAction(developingFilters, simplifyAction,
-                         QStringLiteral("体网格简化 (Volume Mesh Simplification)"));
 
     QMenu* developingData = developingFilters->addMenu(QStringLiteral("数据处理 (Data Processing)"));
     addDevelopmentAction(developingData, approvedMenuAction(mesh_processing,
@@ -7467,6 +7465,9 @@ void igQtMainWindow::initAllFilters() {
                     dialog->close();
                 });
             });
+
+    addDevelopmentAction(developingFiltersBatch2, simplifyAction,
+                         QStringLiteral("体网格简化 (Volume Mesh Simplification)"));
     // 9.28 布置的第二批 filter：按上游约定追加在「开发中filter/第二批」末尾。
     // 这里只放代理入口，实际行为由「标准过滤器」里同 id 的 QAction 承担
     // （见 igQtMainWindowStandardFilters.cpp 的 filterPanel 懒加载面板）。
