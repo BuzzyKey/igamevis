@@ -60,6 +60,8 @@
 #include "AttributeManipulation/iGamePerlinNoiseFilter.h"
 
 #include "AppendReduce/iGameAppendReduceFilter.h"
+#include "AppendArcLength/iGameAppendArcLengthFilter.h"
+#include "Histogram/iGameHistogramFilter.h"
 #include "Tube/iGameTube.h"
 #include "Attribute/iGameExtractComponentFilter.h"
 #include "AxisAlignedReflection/iGameAxisAlignedReflectionFilter.h"
