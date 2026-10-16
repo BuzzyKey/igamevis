@@ -49,6 +49,7 @@
 #include "FeatureExtraction/iGameAdvancedGradientFilter.h"
 #include "FeatureExtraction/iGameLaplacianFilter.h"
 #include "FeatureExtraction/iGameFeatureEdgesFilter.h"
+#include "Smooth/iGameSmoothFilter.h"
 #include "FeatureExtraction/iGameOutlineCornerFilter.h"
 #include "Outline/iGameOutlineFilter.h"
 #include "FeatureExtraction/iGameVortexDetectionFilter.h"
