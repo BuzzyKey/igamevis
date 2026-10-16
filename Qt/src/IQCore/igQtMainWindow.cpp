@@ -1984,6 +1984,7 @@ void igQtMainWindow::initAllFilters() {
         {"smooth", "平滑", StandardFilterCategory::Geometry, false},
         {"subdivide", "细分", StandardFilterCategory::Geometry, false},
         {"surface_normals", "表面法向量", StandardFilterCategory::DataAttributes, true},
+        {"tensor_principal_invariants", "张量主值与主方向", StandardFilterCategory::DataAttributes, false},
         {"surface_vectors", "表面向量", StandardFilterCategory::DataAttributes, false},
         {"temporal_shift_scale", "时间平移与缩放", StandardFilterCategory::Transform, false},
         {"temporal_statistics", "时间统计", StandardFilterCategory::DataAttributes, false},
@@ -8708,6 +8709,16 @@ void igQtMainWindow::initAllFilters() {
                     dialog->close();
                 });
             });
+    // 9.28 布置的第二批 filter：按上游约定追加在「开发中filter/第二批」末尾。
+    // 这里只放代理入口，实际行为由「标准过滤器」里同 id 的 QAction 承担
+    // （见 igQtMainWindowStandardFilters.cpp 的 filterPanel 懒加载面板）。
+    static const DevelopmentEntry batch2Entries[] = {
+        {"tensor_principal_invariants", "张量主值 (Tensor Principal Invariants)"},
+    };
+    for (const DevelopmentEntry& entry : batch2Entries) {
+        addDevelopmentAction(developingFiltersBatch2, approvedFilter(entry.id),
+                             QString::fromUtf8(entry.label));
+    }
 }
 
 void igQtMainWindow::initAllDockWidgetConnectWithAction() {

@@ -737,6 +737,8 @@ igame_add_example(testConnectivitySelfCheck Filter/Connectivity/TestConnectivity
 # ReverseSense
 igame_add_example(testReverseSense Filter/ReverseSense/TestReverseSense.cpp)
 igame_add_example(testReverseSenseSelfCheck Filter/ReverseSense/TestReverseSenseSelfCheck.cpp)
+# Tensor principal invariants
+igame_add_example(testTensorPrincipalInvariants Filter/TestTensorPrincipalInvariants.cpp)
 # Cylinder texture mapping
 igame_add_example(testTextureMapToCylinder Filter/TestTextureMapToCylinder.cpp)
 
