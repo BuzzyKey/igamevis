@@ -5827,7 +5827,7 @@ void igQtMainWindow::initAllFilters() {
                 manualDialog->deleteLater();
                 dialog->deleteLater();
             });
-        });
+    });
     });
 
     auto addDevelopmentAction = [this](QMenu* menu, QAction* approved, const QString& label) {
@@ -7234,6 +7234,81 @@ void igQtMainWindow::initAllFilters() {
     });
 
     // 9.28 新增 filter 统一追加到“开发中filter/第二批”菜单末尾。
+    QAction* integrateVariables =
+            developingFiltersBatch2->addAction(QStringLiteral("变量积分 (Integrate Variables)"));
+    integrateVariables->setObjectName(QStringLiteral("action_developing_integrate_variables"));
+    integrateVariables->setData(QStringLiteral("integrate_variables"));
+    connect(integrateVariables, &QAction::triggered, this, [this](bool) {
+        auto* scene = rendererWidget->GetScene();
+        auto model = scene ? scene->GetCurrentModel() : nullptr;
+        auto data = model ? model->GetDataObject() : nullptr;
+        if (data == nullptr) {
+            showDarkFramelessMessage(QStringLiteral("No Model Available"),
+                                     QStringLiteral("Please load and select a model first."));
+            return;
+        }
+        const auto dtype = data->GetDataObjectType();
+        if (dtype != IG_SURFACE_MESH && dtype != IG_VOLUME_MESH &&
+            dtype != IG_UNSTRUCTURED_MESH && dtype != IG_STRUCTURED_MESH) {
+            showDarkFramelessMessage(
+                    QStringLiteral("Unsupported Model"),
+                    QStringLiteral("Integrate Variables supports surface, volume, unstructured, and structured meshes."));
+            return;
+        }
+
+        auto* dialog = new igQtFilterDialogDockWidget(this, true);
+        dialog->setFilterTitle(QStringLiteral("积分变量 (Integrate Variables)"));
+        dialog->setFilterDescription(QStringLiteral(
+                "对最高维度单元的点属性和单元属性进行积分。输出为一个点，并保存积分结果及总长度、总面积或总体积。"));
+
+        dialog->addParameter(igQtFilterDialogDockWidget::QT_COMBO_BOX,
+                             QStringLiteral("积分策略"),
+                             std::vector<QString>{QStringLiteral("Linear Strategy")});
+        const int divideCellDataId = dialog->addParameter(
+                igQtFilterDialogDockWidget::QT_CHECK_BOX,
+                QStringLiteral("单元数据除以总测度"),
+                QStringLiteral("false"));
+
+        dialog->setApplyFunctor([this, dialog, data, divideCellDataId]() {
+            bool optionOk = false;
+            const bool divideCellData = dialog->getChecked(divideCellDataId, optionOk);
+            if (!optionOk) {
+                showDarkFramelessMessage(QStringLiteral("Warning"),
+                                         QStringLiteral("无法读取积分选项。"));
+                return;
+            }
+
+            IntegrateVariablesFilter::Pointer filter = IntegrateVariablesFilter::New();
+            filter->SetInput(data);
+            filter->SetDivideAllCellDataByMeasure(divideCellData);
+            if (!filter->Execute()) {
+                std::string message = filter->GetMessage();
+                if (message.empty()) message = "IntegrateVariablesFilter execute failed";
+                showDarkFramelessMessage(QStringLiteral("Warning"),
+                                         QString::fromStdString(message));
+                return;
+            }
+
+            auto output = filter->GetOutput();
+            if (!output) {
+                showDarkFramelessMessage(QStringLiteral("Warning"),
+                                         QStringLiteral("积分算法没有生成有效输出。"));
+                return;
+            }
+
+            modelTreeWidget->addDataObjectToModelTree(output, Algorithm);
+            if (auto item = modelTreeWidget->getItemFromObject(output)) item->setExpanded(true);
+            rendererWidget->update();
+            dialog->hide();
+            dialog->deleteLater();
+
+            ui->dockWidget_SearchInfo->show();
+            ui->dockWidget_SearchInfo->raise();
+            ui->widget_SearchInfo->setCurrentModel(rendererWidget->GetScene()->GetCurrentModel());
+        });
+        dialog->resize(480, 320);
+        dialog->show();
+    });
     QAction* decimatePolylineAction =
             developingFiltersBatch2->addAction(QStringLiteral("折线简化 (Decimate Polyline)"));
 
