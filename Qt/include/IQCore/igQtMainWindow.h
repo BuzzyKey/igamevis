@@ -58,6 +58,7 @@ class igQtTriangleStripWidget;
 class igQtExtractCellsByTypeWidget;
 class igQtAxisAlignedReflectionWidget;
 class igQtPointAndCellIdsWidget;
+class igQtSmoothWidget;
 class igQtExtractComponentWidget;
 class igQtLinearExtrusionWidget;
 class igQtMedianFilterWidget;
@@ -148,6 +149,10 @@ public:
     igQtRemoteModelLibrary* remoteModelLibrary{nullptr};
 
     int m_outlineCount{0};
+
+    QDockWidget* SmoothDockWidget{nullptr};
+    igQtSmoothWidget* SmoothWidget{nullptr};
+    int m_smoothCount{0};
 
 private slots:
     void updateRecentFilePaths();
