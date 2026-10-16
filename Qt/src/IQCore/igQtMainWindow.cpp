@@ -100,6 +100,7 @@
 #include <IQWidgets/igQtPointVolumeInterpolatorWidget.h>
 #include <IQWidgets/igQtExtractLocationWidget.h>
 #include <IQWidgets/igQtGlobalIdWidget.h>
+#include <IQWidgets/igQtSmoothWidget.h>
 #include <IQWidgets/igQtLinearExtrusionWidget.h>
 #include <IQWidgets/igQtAxisAlignedReflectionWidget.h>
 #include <IQWidgets/igQtMergeVectorComponentsWidget.h>
@@ -1311,6 +1312,21 @@ void igQtMainWindow::initAllUnDefinedComponents() {
 
     modelTreeWidget = new igQtModelDialogWidget(this);
 
+    // 初始化表面平滑参数面板
+    SmoothDockWidget = igQtSmoothWidget::createDockWidget(this);
+    SmoothWidget = qobject_cast<igQtSmoothWidget*>(SmoothDockWidget->widget());
+    this->addDockWidget(Qt::RightDockWidgetArea, SmoothDockWidget);
+    SmoothDockWidget->resize(400, 340);
+    SmoothDockWidget->hide();
+    connect(SmoothWidget, &igQtSmoothWidget::cancelRequested, SmoothDockWidget, &QDockWidget::hide);
+    connect(SmoothWidget, &igQtSmoothWidget::smoothGenerated, this,
+            [this](iGame::DataObject::Pointer output) {
+                if (!output) return;
+                output->SetName(QStringLiteral("Smooth_%1").arg(++m_smoothCount).toStdString());
+                modelTreeWidget->addDataObjectToModelTree(output, Algorithm);
+                rendererWidget->update();
+            });
+
     auto makeWidgetScrollable = [&](QWidget* content, QWidget* parent) -> QWidget* {
         if (!content) return nullptr;
         if (qobject_cast<QScrollArea*>(content)) return content;
@@ -2058,6 +2074,20 @@ void igQtMainWindow::initAllFilters() {
         showDarkFramelessMessage(title, QStringLiteral("Filter 执行完成。"), true);
     };
 
+    auto showSmoothPanel = [this]() {
+        auto scene = rendererWidget->GetScene();
+        auto model = scene ? scene->GetCurrentModel() : nullptr;
+        if (!model || !modelTreeWidget->getItemFromObject(model->GetDataObject())) {
+            showDarkFramelessMessage(QStringLiteral("表面平滑"), QStringLiteral("请先选择一个模型。"));
+            return;
+        }
+        SmoothWidget->resetForm();
+        SmoothWidget->setCurrentModel(model);
+        SmoothDockWidget->show();
+        SmoothDockWidget->raise();
+        SmoothWidget->setFocus(Qt::OtherFocusReason);
+    };
+
     auto connectStandardFilterAction = [&](QAction* action, const QString& filterId) -> bool {
         if (filterId == QStringLiteral("generate_surface_tangents")) {
             connect(action, &QAction::triggered, this, [this](bool checked) {
@@ -2561,6 +2591,10 @@ void igQtMainWindow::initAllFilters() {
         });
         dialog->show();
     });
+            return true;
+        }
+        if (filterId == QStringLiteral("smooth")) {
+            connect(action, &QAction::triggered, this, showSmoothPanel);
             return true;
         }
         // Approved filters retain independent entries in the development menus.
@@ -7883,6 +7917,23 @@ void igQtMainWindow::initAllFilters() {
         });
         dialog->show();
     });
+
+    QAction* smoothAction = developingFiltersBatch2->addAction(QStringLiteral("表面平滑 (Smooth)"));
+    smoothAction->setObjectName(QStringLiteral("action_Smooth"));
+    connect(smoothAction, &QAction::triggered, this, showSmoothPanel);
+
+    // 同步当前模型，避免面板继续处理已删除的模型
+    connect(modelTreeWidget, &igQtModelDialogWidget::CurrendModelChanged, this, [this]() {
+        SmoothWidget->setCurrentModel(nullptr);
+        QTimer::singleShot(0, this, [this]() {
+            auto scene = rendererWidget->GetScene();
+            auto model = scene ? scene->GetCurrentModel() : nullptr;
+            if (model && modelTreeWidget->getItemFromObject(model->GetDataObject())) {
+                SmoothWidget->setCurrentModel(model.get());
+            }
+        });
+    });
+
 }
 
 void igQtMainWindow::initAllDockWidgetConnectWithAction() {
