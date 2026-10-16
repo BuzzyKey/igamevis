@@ -723,6 +723,9 @@ igame_add_example(testExtractLocationDrag Filter/DataProcessing/ExtractLocation/
 
 # Force Static Mesh: cached geometry (pinned to the frame that built the cache) + attribute updates.
 igame_add_example(testForceStaticMesh Filter/ForceStaticMesh/TestForceStaticMesh.cpp)
+# 无窗口的数值/逻辑一致性回归检查（失败时返回非 0，可直接进 CI）
+igame_add_example(testHistogramChecks Filter/Histogram/TestHistogramChecks.cpp)
+igame_add_example(testAppendArcLengthChecks Filter/AppendArcLength/TestAppendArcLengthChecks.cpp)
 
 # Append Attributes: merges point/cell attribute arrays from several inputs sharing the same layout.
 igame_add_example(testAppendAttributes Filter/AppendAttributes/TestAppendAttributes.cpp)
