@@ -674,6 +674,7 @@ igame_add_example(testCountCellFaces Filter/FeatureExtraction/CountCellFaces.cpp
 igame_add_example(testCountCellFacesOutput Filter/FeatureExtraction/CountCellFacesOutput.cpp)
 igame_add_example(testFeatureEdgeRegion Filter/FeatureExtraction/FeatureEdgeRegion.cpp)
 igame_add_example(testThresholdAndGenerateIds Filter/TestThresholdAndGenerateIds.cpp)
+igame_add_example(testWarpByVector Filter/TestWarpByVector.cpp)
 igame_add_example(testMeshQuality Filter/MeshQuality/TestMeshQuality.cpp)
 igame_add_example(testPointLineInterpolator Filter/PointLineInterpolator/TestPointLineInterpolator.cpp)
 igame_add_example(testPointSetToOctree Filter/Convert/TestPointSetToOctree.cpp)
