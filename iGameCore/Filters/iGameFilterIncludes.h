@@ -4,6 +4,7 @@
 #include "Convert/iGameConvertToVertexFilter.h"
 #include "Convert/iGameConvertToSurfaceMeshFilter.h"
 #include "Convert/iGameConvertToVolumeMeshFilter.h"
+#include "DataProcessing/iGameDecimatePolylineFilter.h"
 #include "Elevation/iGameElevationFilter.h"
 #include "ExtractEnclosedPoints/iGameExtractEnclosedPointsFilter.h"
 #include "ExtractSubset/iGameExtractSubsetFilter.h"
@@ -11,10 +12,12 @@
 #include "MaskPoints/iGameMaskPointsFilter.h"
 #include "MeshCodec/iGameMeshDecoderFilter.h"
 #include "MeshCodec/iGameMeshEncoderFilter.h"
+#include "Median/iGameMedianFilter.h"
 #include "ModelSurface/iGameModelGeometryFilter.h"
 #include "CellCenter/iGameCellCenterFilter.h"
 #include "ParallelCoordinates/iGameGenerateParallelCoordinatesData.h"
 #include "PlotLine/iGameGeneratePlotLineDataFilter.h"
+#include "RenameArrays/iGameRenameArrays.h"
 #include "PointCoordinates/iGamePointCoordinatesFilter.h"
 #include "Probe/iGameProbeFilter.h"
 #include "RemoveGhostInformation/iGameRemoveGhostInformationFilter.h"
@@ -53,6 +56,7 @@
 
 #include "Animation/iGameAttrDiff.h"
 #include "AttributeManipulation/iGameRandomVectorsFilter.h"
+#include "AttributeManipulation/iGamePerlinNoiseFilter.h"
 
 #include "AppendReduce/iGameAppendReduceFilter.h"
 #include "Tube/iGameTube.h"
