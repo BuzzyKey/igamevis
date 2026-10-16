@@ -730,6 +730,9 @@ igame_add_example(testAppendArcLengthChecks Filter/AppendArcLength/TestAppendArc
 # Append Attributes: merges point/cell attribute arrays from several inputs sharing the same layout.
 igame_add_example(testAppendAttributes Filter/AppendAttributes/TestAppendAttributes.cpp)
 
+# Connectivity
+igame_add_example(testConnectivity Filter/Connectivity/TestConnectivity.cpp)
+igame_add_example(testConnectivitySelfCheck Filter/Connectivity/TestConnectivitySelfCheck.cpp)
 # ReverseSense
 igame_add_example(testReverseSense Filter/ReverseSense/TestReverseSense.cpp)
 igame_add_example(testReverseSenseSelfCheck Filter/ReverseSense/TestReverseSenseSelfCheck.cpp)
