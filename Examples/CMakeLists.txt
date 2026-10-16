@@ -208,6 +208,7 @@ set(IGAME_BATCH2_EXAMPLES
     testTriangleStripWidget
     testBatch2GeometryValidation
     testStandardFiltersMenu
+    testTextureMapToPlane
 )
 set(IGAME_BATCH2_VISUAL_EXAMPLES
     testCountCellVertices
@@ -236,6 +237,13 @@ set(_IGAME_MODEL_GEOMETRY_FIXTURE
 
 function(igame_register_example_test EXAMPLE_TARGET)
     if (NOT TARGET ${EXAMPLE_TARGET})
+        return()
+    endif ()
+
+    if ("${EXAMPLE_TARGET}" STREQUAL "testSmooth")
+        add_test(NAME ${EXAMPLE_TARGET} COMMAND "$<TARGET_FILE:${EXAMPLE_TARGET}>" --check
+            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+        set_tests_properties(${EXAMPLE_TARGET} PROPERTIES TIMEOUT 180)
         return()
     endif ()
 
@@ -480,6 +488,9 @@ igame_add_example(testGetClosestPointsInLine Filter/Selection/TestGetClosestPoin
 igame_add_example(testGetClosestCellsInLine Filter/Selection/TestGetClosestCellsInLine.cpp)
 igame_add_example(testGetPointsInFrustum Filter/Selection/TestGetPointsInFrustum.cpp)
 igame_add_example(testGetCellsInFrustum Filter/Selection/TestGetCellsInFrustum.cpp)
+# Data processing
+igame_add_example(testDecimatePolyline
+    Filter/DataProcessing/DecimatePolyline/TestDecimatePolyline.cpp)
 
 # Compression
 igame_add_example(testDecoder Filter/Compression/TestDecoder.cpp)
@@ -493,6 +504,8 @@ igame_add_example(testConvertToPointCloud Filter/Convert/TestConvertToPointCloud
 igame_add_example(testConvertToVolumeMesh Filter/Convert/TestConvertToVolumeMesh.cpp)
 igame_add_example(testConvertToSurfaceMesh Filter/Convert/TestConvertToSurfaceMesh.cpp)
 igame_add_example(testConvertToLagrangeUnstructuredMesh Filter/Convert/TestConvertToLagrangeUnstructuredMesh.cpp)
+
+igame_add_example(testSmooth Filter/Smooth/TestSmooth.cpp)
 
 # IO (optional modules)
 igame_add_example(testSplineReaderCPU IO/SplineReaderCPU.cpp)
@@ -575,8 +588,15 @@ igame_add_example(testIsoVolume Filter/TestIsoVolume.cpp)
 igame_add_example(testDeformation Filter/Deformation/TestStressDeformationFilter.cpp)
 igame_add_example(testDeformationCode Filter/Deformation/TestStressDeformationFilterCode.cpp)
 igame_add_example(testContourLine Filter/TestContourLine.cpp)
+igame_add_example(testMultiBlockGeometry Filter/TestMultiBlockGeometry.cpp)
+igame_add_example(testCellMeshMetrics Filter/TestCellMeshMetrics.cpp)
+igame_add_example(testGhostDemo Filter/GhostCell/TestGhostDemo.cpp)
+igame_add_example(testGroupDatasets Filter/TestGroupDatasets.cpp)
 # Modeling：线性拉伸（Linear Extrusion）
 igame_add_example(testLinearExtrusion Filter/TestLinearExtrusion.cpp)
+# 表面切向量 (Generate Surface Tangents)
+igame_add_example(testGenerateSurfaceTangents Filter/GenerateSurfaceTangents/TestGenerateSurfaceTangents.cpp)
+igame_add_example(testMedianFilter Filter/Median/TestMedianFilter.cpp)
 
 # ������ #5 + �е����� #28 ���ײ�������
 igame_add_example(testGhostCellModel Filter/GhostCell/TestGhostCellModel.cpp)
@@ -584,6 +604,7 @@ igame_add_example(testPlaneSamplingFilter Filter/TestPlaneSampling.cpp)
 igame_add_example(testExtractEnclosedPoints Filter/TestExtractEnclosedPoints.cpp)
 
 igame_add_example(TestTubeFilter Filter/Tube/TestTubeFilter.cpp)
+igame_add_example(TestSubdivideFilter Filter/Subdivide/TestSubdivideFilter.cpp)
 #        #5 +  е      #28    ײ       
 igame_add_example(testContourExtraction Filter/TestContourExtraction.cpp)
 igame_add_example(testModelGeometryParallelValidation Filter/ModelGeometryParallelValidation.cpp)
@@ -663,6 +684,7 @@ igame_add_example(testCountCellFaces Filter/FeatureExtraction/CountCellFaces.cpp
 igame_add_example(testCountCellFacesOutput Filter/FeatureExtraction/CountCellFacesOutput.cpp)
 igame_add_example(testFeatureEdgeRegion Filter/FeatureExtraction/FeatureEdgeRegion.cpp)
 igame_add_example(testThresholdAndGenerateIds Filter/TestThresholdAndGenerateIds.cpp)
+igame_add_example(testWarpByVector Filter/TestWarpByVector.cpp)
 igame_add_example(testMeshQuality Filter/MeshQuality/TestMeshQuality.cpp)
 igame_add_example(testPointLineInterpolator Filter/PointLineInterpolator/TestPointLineInterpolator.cpp)
 igame_add_example(testPointSetToOctree Filter/Convert/TestPointSetToOctree.cpp)
@@ -682,6 +704,7 @@ igame_add_example(testWarpByScalar Filter/WarpByScalar/TestWarpByScalar.cpp)
 igame_add_example(testPointCoordinates Filter/PointCoordinates/TestPointCoordinates.cpp)
 igame_add_example(testCellCenterFilter Filter/CellCenter/TestCellCenterFilter.cpp)
 igame_add_example(testExtractCellsByType Filter/MyFilter/TestExtractCellsByType.cpp)
+igame_add_example(TestValidateCellsFilter Filter/MyFilter/TestValidateCellsFilter.cpp)
 igame_add_example(testRandomVectors Filter/AttributeManipulation/TestRandomVectors.cpp)
 igame_add_example(testRemoveGhostInformation Filter/RemoveGhostInformation/TestRemoveGhostInformation.cpp)
 igame_add_example(testMaskPoints Filter/MaskPoints/TestMaskPoints.cpp)
@@ -695,14 +718,30 @@ igame_add_example(testExtractSubset Filter/TestExtractSubset.cpp)
 # Extract Location and Overlapping Cells Detector regression examples.
 igame_add_example(testExtractLocation Filter/DataProcessing/ExtractLocation/TestExtractLocation.cpp)
 igame_add_example(testOverlappingCellsDetector Filter/DataProcessing/OverlappingCellsDetector/TestOverlappingCellsDetector.cpp)
+igame_add_example(testTextureMapToPlane Filter/DataProcessing/TextureMapToPlane/TestTextureMapToPlane.cpp)
 
 igame_add_example(testExtractLocationDrag Filter/DataProcessing/ExtractLocation/TestExtractLocationDrag.cpp)
 
 # Force Static Mesh: cached geometry (pinned to the frame that built the cache) + attribute updates.
 igame_add_example(testForceStaticMesh Filter/ForceStaticMesh/TestForceStaticMesh.cpp)
+# 无窗口的数值/逻辑一致性回归检查（失败时返回非 0，可直接进 CI）
+igame_add_example(testHistogramChecks Filter/Histogram/TestHistogramChecks.cpp)
+igame_add_example(testAppendArcLengthChecks Filter/AppendArcLength/TestAppendArcLengthChecks.cpp)
 
 # Append Attributes: merges point/cell attribute arrays from several inputs sharing the same layout.
 igame_add_example(testAppendAttributes Filter/AppendAttributes/TestAppendAttributes.cpp)
+
+# ReverseSense
+igame_add_example(testReverseSense Filter/ReverseSense/TestReverseSense.cpp)
+igame_add_example(testReverseSenseSelfCheck Filter/ReverseSense/TestReverseSenseSelfCheck.cpp)
+# Cylinder texture mapping
+igame_add_example(testTextureMapToCylinder Filter/TestTextureMapToCylinder.cpp)
+
+# PerlinNoise: samples 3D Perlin noise at every input point into a point scalar array.
+igame_add_example(testPerlinNoise Filter/AttributeManipulation/TestPerlinNoise.cpp)
+
+igame_add_example(testTextureMapToSphere Filter/TextureMapToSphere/TestTextureMapToSphere.cpp)
+igame_add_example(testResampleWithDataSet Filter/TestResampleWithDataSet.cpp)
 
 get_property(IGAME_EXAMPLE_TARGETS DIRECTORY PROPERTY IGAME_EXAMPLE_TARGETS)
 if (NOT IGAME_EXAMPLE_TARGETS)
