@@ -75,6 +75,28 @@ else ()
     set(CMAKE_CUDA_STANDARD_REQUIRED TRUE)
 endif ()
 
+# Redetect localized MSVC /showIncludes output using the Windows code page.
+# Ninja needs the matching prefix to track headers; a prefix decoded as UTF-8
+# from Chinese compiler output silently loses dependencies in incremental builds.
+#if (MSVC AND CMAKE_GENERATOR MATCHES "Ninja")
+#    set(showincludes_probe "${CMAKE_BINARY_DIR}/CMakeFiles/igame_showincludes.c")
+#    file(WRITE "${showincludes_probe}" "#include <stddef.h>\n")
+#    execute_process(
+#            COMMAND "${CMAKE_C_COMPILER}" /nologo /showIncludes /EP "${showincludes_probe}"
+#            OUTPUT_VARIABLE showincludes_output
+#            ERROR_VARIABLE showincludes_error
+#            RESULT_VARIABLE showincludes_result
+#            ENCODING AUTO)
+#    string(REGEX MATCH "([^\r\n]+:) +[A-Za-z]:[/\\\\]" showincludes_match
+#            "${showincludes_output}\n${showincludes_error}")
+#    if (NOT showincludes_result EQUAL 0 OR NOT showincludes_match)
+#        message(FATAL_ERROR "Unable to detect MSVC /showIncludes prefix for Ninja")
+#    endif ()
+#    set(CMAKE_CL_SHOWINCLUDES_PREFIX "${CMAKE_MATCH_1}")
+#    set(CMAKE_C_CL_SHOWINCLUDES_PREFIX "${CMAKE_CL_SHOWINCLUDES_PREFIX}")
+#    set(CMAKE_CXX_CL_SHOWINCLUDES_PREFIX "${CMAKE_CL_SHOWINCLUDES_PREFIX}")
+#endif ()
+
 # Required by Windows-specific third-party headers (notably Abaqus).  Keep
 # this independent of the CUDA switch so the native platform contract is the
 # same in both project() branches.
@@ -216,4 +238,51 @@ endif ()
 
 if (ENABLE_WASM)
     add_subdirectory(Examples/Wasm)
+endif ()
+
+# 无窗口的过滤器回归检查 exe（不依赖 Examples/HDF5，默认关闭；失败时返回非 0，可直接进 CI）
+option(IGAME_BUILD_FILTER_CHECKS "Build windowless filter regression check executables." OFF)
+if (IGAME_BUILD_FILTER_CHECKS)
+    add_executable(testHistogramChecks Examples/Filter/Histogram/TestHistogramChecks.cpp)
+    target_link_libraries(testHistogramChecks PRIVATE iGameCore)
+    target_compile_definitions(testHistogramChecks PRIVATE IGAME_PLATFORM_WINDOWS PLATFORM_WINDOWS IGAME_OPENGL_VERSION_460)
+
+    add_executable(testAppendArcLengthChecks Examples/Filter/AppendArcLength/TestAppendArcLengthChecks.cpp)
+    target_link_libraries(testAppendArcLengthChecks PRIVATE iGameCore)
+    target_compile_definitions(testAppendArcLengthChecks PRIVATE IGAME_PLATFORM_WINDOWS PLATFORM_WINDOWS IGAME_OPENGL_VERSION_460)
+
+    # 可视化测试：开 OpenGL 窗口显示过滤器结果（写法同 Examples/Filter/Convert/TestResampleToImage.cpp）
+    add_executable(testHistogram Examples/Filter/Histogram/TestHistogram.cpp)
+    target_link_libraries(testHistogram PRIVATE iGameCore)
+    target_compile_definitions(testHistogram PRIVATE IGAME_PLATFORM_WINDOWS PLATFORM_WINDOWS IGAME_OPENGL_VERSION_460)
+
+    add_executable(testAppendArcLength Examples/Filter/AppendArcLength/TestAppendArcLength.cpp)
+    target_link_libraries(testAppendArcLength PRIVATE iGameCore)
+    target_compile_definitions(testAppendArcLength PRIVATE IGAME_PLATFORM_WINDOWS PLATFORM_WINDOWS IGAME_OPENGL_VERSION_460)
+
+    # 测试模型随 exe 一起放到 <exe 目录>/Models，运行时不必关心工作目录
+    set(_igameFilterCheckTargets testHistogramChecks testAppendArcLengthChecks testHistogram testAppendArcLength)
+    foreach (_filterCheck IN LISTS _igameFilterCheckTargets)
+        add_custom_command(TARGET ${_filterCheck} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${_filterCheck}>/Models"
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        "${CMAKE_CURRENT_SOURCE_DIR}/Examples/Models/Histogram_test.vtk"
+                        "${CMAKE_CURRENT_SOURCE_DIR}/Examples/Models/AppendArcLength_test.vtk"
+                        "${CMAKE_CURRENT_SOURCE_DIR}/Examples/Models/Convert_Quad_Bicycle.vtk"
+                        "$<TARGET_FILE_DIR:${_filterCheck}>/Models"
+                COMMENT "Copying filter check models next to ${_filterCheck}")
+    endforeach ()
+    add_executable(testResampleOctreeChecks Examples/Filter/Convert/TestResampleOctreeChecks.cpp)
+    target_link_libraries(testResampleOctreeChecks PRIVATE iGameCore)
+
+    add_executable(testResamplePolyhedronChecks Examples/Filter/Convert/TestResamplePolyhedronChecks.cpp)
+    target_link_libraries(testResamplePolyhedronChecks PRIVATE iGameCore)
+
+    add_executable(testCGNSResample Examples/Filter/Convert/TestCGNSResample.cpp)
+    target_link_libraries(testCGNSResample PRIVATE iGameCore)
+
+    if (ENABLE_QT_MODULE)
+        add_executable(testResampleUI Examples/Filter/Convert/TestResampleUI.cpp)
+        target_link_libraries(testResampleUI PRIVATE Qt_module)
+    endif ()
 endif ()
