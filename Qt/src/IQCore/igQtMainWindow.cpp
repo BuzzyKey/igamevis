@@ -4435,7 +4435,7 @@ void igQtMainWindow::initAllFilters() {
         }
     });
 
-    connect(mesh_processing->addAction(QStringLiteral("Surface Extraction（表面提取）")), &QAction::triggered, this, [&](bool checked) {
+    connect(mesh_processing->addAction(QStringLiteral("表面提取 (Extract Surface)")), &QAction::triggered, this, [&](bool checked) {
         if (rendererWidget->GetScene()->GetCurrentModel() == nullptr) return;
         auto obj = rendererWidget->GetScene()->GetCurrentModel()->GetDataObject();
         if (!obj) return;
@@ -5722,7 +5722,7 @@ void igQtMainWindow::initAllFilters() {
         {"transform", "通用几何变换 (Transform)"},
         {"cell_size", "计算单元尺寸 (ComputeCellSize)"},
         {"boundary_mesh_quality", "边界网格质量 (Boundary Mesh Quality)"},
-        {"multiblock_surface_as_multiblock", "多块模型表面提取"},
+        {"multiblock_surface_as_multiblock", "多块模型表面提取 (Extract Surface)"},
         {"feature_edges_region_ids", "特征区域Id (FeatureEdgeRegion id)"},
         {"append_location_attributes", "附加点坐标到属性(AppendLocaitonAttribute)"},
         {"pass_arrays", "传递过滤数据数组 (Pass Arrays)"},
@@ -6037,6 +6037,40 @@ void igQtMainWindow::initAllFilters() {
     bindDevelopmentAction("cell_mesh_metrics", [executeDevelopmentFilter]() {
         executeDevelopmentFilter(QStringLiteral("单元网格指标"), CellMeshMetricsFilter::New());
     });
+    // 多块表面提取：升级自分支增强逻辑（输入校验 + 失败块汇总），入口复用开发菜单中的既有多块项。
+    bindDevelopmentAction("multiblock_surface_as_multiblock",
+                          [this, currentFilterInput, refreshFilterResult]() {
+        const QString title = QStringLiteral("多块模型表面提取");
+        auto input = currentFilterInput(title);
+        if (!input) return;
+
+        auto multiBlockFilter = MultiBlockGeometryFilter::New();
+        multiBlockFilter->SetInput(input);
+        if (!multiBlockFilter->Execute()) {
+            QString errorMsg = QString::fromStdString(multiBlockFilter->GetMessage());
+            if (errorMsg.isEmpty()) { errorMsg = QStringLiteral("多块模型表面提取失败。"); }
+            showDarkFramelessMessage(title, errorMsg);
+            return;
+        }
+
+        auto multiBlockObj = multiBlockFilter->GetOutput();
+        if (multiBlockObj) {
+            multiBlockObj->SetName(input->GetName() + "_MultiBlockSurface");
+        }
+        refreshFilterResult(input, multiBlockObj, title);
+
+        // 子构件层面的异常信息汇总展示（避免静默丢块）
+        const auto& failedBlocks = multiBlockFilter->GetFailedBlocks();
+        if (!failedBlocks.empty()) {
+            QString warningMsg = QStringLiteral("多块表面提取已完成，但以下 %1 个子构件处理异常（已为您原样保留）：\n")
+                                     .arg(failedBlocks.size());
+            for (const auto& block : failedBlocks) {
+                warningMsg += QStringLiteral("• [%1]: %2\n")
+                                  .arg(QString::fromStdString(block.path), QString::fromStdString(block.reason));
+            }
+            showDarkFramelessMessage(QStringLiteral("部分子构件提示"), warningMsg);
+        }
+    });
     bindDevelopmentAction("axis_aligned_reflection", [this]() {
         auto scene = rendererWidget->GetScene();
         if (!scene || !scene->GetCurrentModel()) {
@@ -6105,9 +6139,6 @@ void igQtMainWindow::initAllFilters() {
         m_axisAlignedReflectionDock->show();
         m_axisAlignedReflectionDock->raise();
         reflectionWidget->setFocus(Qt::OtherFocusReason);
-    });
-    bindDevelopmentAction("multiblock_surface_as_multiblock", [executeDevelopmentFilter]() {
-        executeDevelopmentFilter(QStringLiteral("多块模型表面提取"), MultiBlockGeometryFilter::New());
     });
     bindDevelopmentAction("extract_location", [this]() {
         auto model = rendererWidget->GetScene()->GetCurrentModel();
@@ -6652,8 +6683,8 @@ void igQtMainWindow::initAllFilters() {
             QStringLiteral("Surface Triangulation（表面三角化）")),
             QStringLiteral("表面三角化 (Surface Triangulation)"));
     addDevelopmentAction(developingData, approvedMenuAction(mesh_processing,
-            QStringLiteral("Surface Extraction（表面提取）")),
-            QStringLiteral("表面提取 (Surface Extraction)"));
+            QStringLiteral("表面提取 (Extract Surface)")),
+            QStringLiteral("表面提取 (Extract Surface)"));
     addDevelopmentAction(developingData, approvedFilter("force_static_mesh"),
             QStringLiteral("强制静态网格 (Force Static Mesh)"));
     auto forceStaticDevelopmentFilter = ForceStaticMeshFilter::New();
