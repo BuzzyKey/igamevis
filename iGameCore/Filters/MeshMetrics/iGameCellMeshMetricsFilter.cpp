@@ -1,5 +1,5 @@
 #include "iGameCellMeshMetricsFilter.h"
-#include "iGameSurfaceMeshMetricsFilter.h"
+#include "iGameCellQualityMath.h"
 
 IGAME_NAMESPACE_BEGIN
 
@@ -125,11 +125,11 @@ bool CellMeshMetricsFilter::ComputeCellMetrics(DataObject::Pointer input, DataOb
                     tetSum += (cx * crx + cy * cry + cz * crz) / 6.0;
                     tetN++;
                 } else if (t == IG_HEXAHEDRON && vn == 8) {
-                    hexSum += VolumeMeshMetricsFilter::ComputeHexVolume(sp); hexN++;
+                    hexSum += CellQualityMath::ComputeHexVolume(sp); hexN++;
                 } else if (t == IG_QUAD && vn == 4) {
-                    quadSum += SurfaceMeshMetricsFilter::ComputeQuadArea(sp); quadN++;
+                    quadSum += CellQualityMath::ComputeQuadArea(sp); quadN++;
                 } else if (t == IG_TRIANGLE && vn == 3) {
-                    triSum += SurfaceMeshMetricsFilter::ComputeTriangleArea(sp); triN++;
+                    triSum += CellQualityMath::ComputeTriangleArea(sp); triN++;
                 }
             }
             if (tetN > 0) { avgTetVolume = tetSum / tetN; }
@@ -156,64 +156,64 @@ bool CellMeshMetricsFilter::ComputeCellMetrics(DataObject::Pointer input, DataOb
             if (type == IG_TETRA && vNum == 4) {
                 switch (m_QualityMetric) {
                     case QUALITY_EDGE_RATIO:
-                        val = VolumeMeshMetricsFilter::ComputeTetEdgeRatio(pts);
+                        val = CellQualityMath::ComputeTetEdgeRatio(pts);
                         supported = true;
                         break;
                     case QUALITY_VOLUME:
-                        val = VolumeMeshMetricsFilter::ComputeTetVolume(pts);
+                        val = CellQualityMath::ComputeTetVolume(pts);
                         supported = true;
                         break;
                     case QUALITY_ASPECT_RATIO:
-                        val = VolumeMeshMetricsFilter::GetAspectRatioOfCell(pts);
+                        val = CellQualityMath::GetAspectRatioOfCell(pts);
                         supported = true;
                         break;
                     case QUALITY_JACOBIAN:
-                        val = VolumeMeshMetricsFilter::GetJacobianOfCell(pts);
+                        val = CellQualityMath::GetJacobianOfCell(pts);
                         supported = true;
                         break;
                     case QUALITY_MIN_ANGLE:
-                        val = VolumeMeshMetricsFilter::GetMinDihedralAngleOfTet(pts); // ← 原来 GetMinInternalAnglesOfCell
+                        val = CellQualityMath::GetMinDihedralAngleOfTet(pts); // ← 原来 GetMinInternalAnglesOfCell
                         supported = true;
                         break;
                     case QUALITY_COLLAPSE_RATIO:
-                        val = VolumeMeshMetricsFilter::GetCollapseRatioOfCell(pts);
+                        val = CellQualityMath::GetCollapseRatioOfCell(pts);
                         supported = true;
                         break;
                     // —— 对齐 ParaView Cell Quality 新增 ——
                     case QUALITY_CONDITION:
-                        val = VolumeMeshMetricsFilter::ComputeTetCondition(pts);
+                        val = CellQualityMath::ComputeTetCondition(pts);
                         supported = true;
                         break;
                     case QUALITY_DISTORTION:
-                        val = VolumeMeshMetricsFilter::ComputeTetDistortion(pts);
+                        val = CellQualityMath::ComputeTetDistortion(pts);
                         supported = true;
                         break;
                     case QUALITY_EQUIANGLE_SKEW:
-                        val = VolumeMeshMetricsFilter::ComputeTetEquiangleSkew(pts);
+                        val = CellQualityMath::ComputeTetEquiangleSkew(pts);
                         supported = true;
                         break;
                     case QUALITY_RADIUS_RATIO:
-                        val = VolumeMeshMetricsFilter::ComputeTetRadiusRatio(pts);
+                        val = CellQualityMath::ComputeTetRadiusRatio(pts);
                         supported = true;
                         break;
                     case QUALITY_SCALED_JACOBIAN:
-                        val = VolumeMeshMetricsFilter::ComputeTetScaledJacobian(pts);
+                        val = CellQualityMath::ComputeTetScaledJacobian(pts);
                         supported = true;
                         break;
                     case QUALITY_SHAPE:
-                        val = VolumeMeshMetricsFilter::ComputeTetShape(pts);
+                        val = CellQualityMath::ComputeTetShape(pts);
                         supported = true;
                         break;
                     // —— 需要全网格平均单元体积的 3 项 ——
                     case QUALITY_RELATIVE_SIZE_SQUARED:
                         if (avgTetVolume > 0.0) {
-                            val = VolumeMeshMetricsFilter::ComputeTetRelativeSizeSquared(pts, avgTetVolume);
+                            val = CellQualityMath::ComputeTetRelativeSizeSquared(pts, avgTetVolume);
                             supported = true;
                         }
                         break;
                     case QUALITY_SHAPE_AND_SIZE:
                         if (avgTetVolume > 0.0) {
-                            val = VolumeMeshMetricsFilter::ComputeTetShapeAndSize(pts, avgTetVolume);
+                            val = CellQualityMath::ComputeTetShapeAndSize(pts, avgTetVolume);
                             supported = true;
                         }
                         break;
@@ -226,84 +226,84 @@ bool CellMeshMetricsFilter::ComputeCellMetrics(DataObject::Pointer input, DataOb
             } else if (type == IG_HEXAHEDRON && vNum == 8) {
                 switch (m_QualityMetric) {
                     case QUALITY_EDGE_RATIO:
-                        val = VolumeMeshMetricsFilter::ComputeHexEdgeRatio(pts);
+                        val = CellQualityMath::ComputeHexEdgeRatio(pts);
                         supported = true;
                         break;
                     case QUALITY_VOLUME:
-                        val = VolumeMeshMetricsFilter::ComputeHexVolume(pts);
+                        val = CellQualityMath::ComputeHexVolume(pts);
                         supported = true;
                         break;
                     case QUALITY_JACOBIAN:
-                        val = VolumeMeshMetricsFilter::ComputeHexJacobian(pts);
+                        val = CellQualityMath::ComputeHexJacobian(pts);
                         supported = true;
                         break;
                     case QUALITY_SKEW:
-                        val = VolumeMeshMetricsFilter::ComputeHexSkew(pts);
+                        val = CellQualityMath::ComputeHexSkew(pts);
                         supported = true;
                         break;
                     case QUALITY_TAPER:
-                        val = VolumeMeshMetricsFilter::ComputeHexTaper(pts);
+                        val = CellQualityMath::ComputeHexTaper(pts);
                         supported = true;
                         break;
                     case QUALITY_STRETCH:
-                        val = VolumeMeshMetricsFilter::ComputeHexStretch(pts);
+                        val = CellQualityMath::ComputeHexStretch(pts);
                         supported = true;
                         break;
                     case QUALITY_DIAGONAL:
-                        val = VolumeMeshMetricsFilter::ComputeHexDiagonal(pts);
+                        val = CellQualityMath::ComputeHexDiagonal(pts);
                         supported = true;
                         break;
                     case QUALITY_MAX_EDGE_RATIO:
-                        val = VolumeMeshMetricsFilter::ComputeHexMaxEdgeRatio(pts);
+                        val = CellQualityMath::ComputeHexMaxEdgeRatio(pts);
                         supported = true;
                         break;
                     // —— 对齐 ParaView Cell Quality 新增 ——
                     case QUALITY_CONDITION:
-                        val = VolumeMeshMetricsFilter::ComputeHexCondition(pts);
+                        val = CellQualityMath::ComputeHexCondition(pts);
                         supported = true;
                         break;
                     case QUALITY_DISTORTION:
-                        val = VolumeMeshMetricsFilter::ComputeHexDistortion(pts);
+                        val = CellQualityMath::ComputeHexDistortion(pts);
                         supported = true;
                         break;
                     case QUALITY_EQUIANGLE_SKEW:
-                        val = VolumeMeshMetricsFilter::ComputeHexEquiangleSkew(pts);
+                        val = CellQualityMath::ComputeHexEquiangleSkew(pts);
                         supported = true;
                         break;
                     case QUALITY_ODDY:
-                        val = VolumeMeshMetricsFilter::ComputeHexOddy(pts);
+                        val = CellQualityMath::ComputeHexOddy(pts);
                         supported = true;
                         break;
                     case QUALITY_SCALED_JACOBIAN:
-                        val = VolumeMeshMetricsFilter::ComputeHexScaledJacobian(pts);
+                        val = CellQualityMath::ComputeHexScaledJacobian(pts);
                         supported = true;
                         break;
                     case QUALITY_SHAPE:
-                        val = VolumeMeshMetricsFilter::ComputeHexShape(pts);
+                        val = CellQualityMath::ComputeHexShape(pts);
                         supported = true;
                         break;
                     case QUALITY_SHEAR:
-                        val = VolumeMeshMetricsFilter::ComputeHexShear(pts);
+                        val = CellQualityMath::ComputeHexShear(pts);
                         supported = true;
                         break;
                     // —— 需要全网格平均单元体积的 3 项 ——
                     case QUALITY_RELATIVE_SIZE_SQUARED:
                         if (avgHexVolume > 0.0) {
-                            val = VolumeMeshMetricsFilter::ComputeHexRelativeSizeSquared(
+                            val = CellQualityMath::ComputeHexRelativeSizeSquared(
                                     pts, avgHexVolume);
                             supported = true;
                         }
                         break;
                     case QUALITY_SHAPE_AND_SIZE:
                         if (avgHexVolume > 0.0) {
-                            val = VolumeMeshMetricsFilter::ComputeHexShapeAndSize(
+                            val = CellQualityMath::ComputeHexShapeAndSize(
                                     pts, avgHexVolume);
                             supported = true;
                         }
                         break;
                     case QUALITY_SHEAR_AND_SIZE:
                         if (avgHexVolume > 0.0) {
-                            val = VolumeMeshMetricsFilter::ComputeHexShearAndSize(
+                            val = CellQualityMath::ComputeHexShearAndSize(
                                     pts, avgHexVolume);
                             supported = true;
                         }
@@ -318,56 +318,56 @@ bool CellMeshMetricsFilter::ComputeCellMetrics(DataObject::Pointer input, DataOb
                 //   Scaled Jacobian / Shape  —— 共 10 项
                 switch (m_QualityMetric) {
                     case QUALITY_AREA:
-                        val = SurfaceMeshMetricsFilter::ComputeTriangleArea(pts);
+                        val = CellQualityMath::ComputeTriangleArea(pts);
                         supported = true;
                         break;
                     case QUALITY_ASPECT_RATIO:
-                        val = SurfaceMeshMetricsFilter::ComputeTriangleAspectRatio(pts);
+                        val = CellQualityMath::ComputeTriangleAspectRatio(pts);
                         supported = true;
                         break;
                     case QUALITY_CONDITION:
-                        val = SurfaceMeshMetricsFilter::ComputeTriangleCondition(pts);
+                        val = CellQualityMath::ComputeTriangleCondition(pts);
                         supported = true;
                         break;
                     case QUALITY_DISTORTION:
-                        val = SurfaceMeshMetricsFilter::ComputeTriangleDistortion(pts);
+                        val = CellQualityMath::ComputeTriangleDistortion(pts);
                         supported = true;
                         break;
                     case QUALITY_EDGE_RATIO:
-                        val = SurfaceMeshMetricsFilter::ComputeTriangleEdgeRatio(pts);
+                        val = CellQualityMath::ComputeTriangleEdgeRatio(pts);
                         supported = true;
                         break;
                     case QUALITY_EQUIANGLE_SKEW:
-                        val = SurfaceMeshMetricsFilter::ComputeTriangleEquiangleSkew(pts);
+                        val = CellQualityMath::ComputeTriangleEquiangleSkew(pts);
                         supported = true;
                         break;
                     case QUALITY_MIN_ANGLE:
-                        val = SurfaceMeshMetricsFilter::ComputeTriangleMinAngle(pts);
+                        val = CellQualityMath::ComputeTriangleMinAngle(pts);
                         supported = true;
                         break;
                     case QUALITY_RADIUS_RATIO:
-                        val = SurfaceMeshMetricsFilter::ComputeTriangleRadiusRatio(pts);
+                        val = CellQualityMath::ComputeTriangleRadiusRatio(pts);
                         supported = true;
                         break;
                     case QUALITY_SCALED_JACOBIAN:
-                        val = SurfaceMeshMetricsFilter::ComputeTriangleScaledJacobian(pts);
+                        val = CellQualityMath::ComputeTriangleScaledJacobian(pts);
                         supported = true;
                         break;
                     case QUALITY_SHAPE:
-                        val = SurfaceMeshMetricsFilter::ComputeTriangleShape(pts);
+                        val = CellQualityMath::ComputeTriangleShape(pts);
                         supported = true;
                         break;
                     // —— 需要全网格平均面积的 2 项 ——
                     case QUALITY_RELATIVE_SIZE_SQUARED:
                         if (avgTriArea > 0.0) {
-                            val = SurfaceMeshMetricsFilter::ComputeTriangleRelativeSizeSquared(
+                            val = CellQualityMath::ComputeTriangleRelativeSizeSquared(
                                     pts, avgTriArea);
                             supported = true;
                         }
                         break;
                     case QUALITY_SHAPE_AND_SIZE:
                         if (avgTriArea > 0.0) {
-                            val = SurfaceMeshMetricsFilter::ComputeTriangleShapeAndSize(
+                            val = CellQualityMath::ComputeTriangleShapeAndSize(
                                     pts, avgTriArea);
                             supported = true;
                         }
@@ -383,91 +383,91 @@ bool CellMeshMetricsFilter::ComputeCellMetrics(DataObject::Pointer input, DataOb
                 //   Skew / Stretch / Taper / Warpage —— 共 17 项
                 switch (m_QualityMetric) {
                     case QUALITY_AREA:
-                        val = SurfaceMeshMetricsFilter::ComputeQuadArea(pts);
+                        val = CellQualityMath::ComputeQuadArea(pts);
                         supported = true;
                         break;
                     case QUALITY_ASPECT_RATIO:
-                        val = SurfaceMeshMetricsFilter::ComputeQuadAspectRatio(pts);
+                        val = CellQualityMath::ComputeQuadAspectRatio(pts);
                         supported = true;
                         break;
                     case QUALITY_CONDITION:
-                        val = SurfaceMeshMetricsFilter::ComputeQuadCondition(pts);
+                        val = CellQualityMath::ComputeQuadCondition(pts);
                         supported = true;
                         break;
                     case QUALITY_DISTORTION:
-                        val = SurfaceMeshMetricsFilter::ComputeQuadDistortion(pts);
+                        val = CellQualityMath::ComputeQuadDistortion(pts);
                         supported = true;
                         break;
                     case QUALITY_EDGE_RATIO:
-                        val = SurfaceMeshMetricsFilter::ComputeQuadEdgeRatio(pts);
+                        val = CellQualityMath::ComputeQuadEdgeRatio(pts);
                         supported = true;
                         break;
                     case QUALITY_EQUIANGLE_SKEW:
-                        val = SurfaceMeshMetricsFilter::ComputeQuadEquiangleSkew(pts);
+                        val = CellQualityMath::ComputeQuadEquiangleSkew(pts);
                         supported = true;
                         break;
                     case QUALITY_JACOBIAN:
-                        val = SurfaceMeshMetricsFilter::ComputeQuadJacobian(pts);
+                        val = CellQualityMath::ComputeQuadJacobian(pts);
                         supported = true;
                         break;
                     case QUALITY_MIN_ANGLE:
-                        val = SurfaceMeshMetricsFilter::ComputeQuadMinAngle(pts);
+                        val = CellQualityMath::ComputeQuadMinAngle(pts);
                         supported = true;
                         break;
                     case QUALITY_ODDY:
-                        val = SurfaceMeshMetricsFilter::ComputeQuadOddy(pts);
+                        val = CellQualityMath::ComputeQuadOddy(pts);
                         supported = true;
                         break;
                     case QUALITY_RADIUS_RATIO:
-                        val = SurfaceMeshMetricsFilter::ComputeQuadRadiusRatio(pts);
+                        val = CellQualityMath::ComputeQuadRadiusRatio(pts);
                         supported = true;
                         break;
                     case QUALITY_SCALED_JACOBIAN:
-                        val = SurfaceMeshMetricsFilter::ComputeQuadScaledJacobian(pts);
+                        val = CellQualityMath::ComputeQuadScaledJacobian(pts);
                         supported = true;
                         break;
                     case QUALITY_SHAPE:
-                        val = SurfaceMeshMetricsFilter::ComputeQuadShape(pts);
+                        val = CellQualityMath::ComputeQuadShape(pts);
                         supported = true;
                         break;
                     case QUALITY_SHEAR:
-                        val = SurfaceMeshMetricsFilter::ComputeQuadShear(pts);
+                        val = CellQualityMath::ComputeQuadShear(pts);
                         supported = true;
                         break;
                     case QUALITY_SKEW:
-                        val = SurfaceMeshMetricsFilter::ComputeQuadSkew(pts);
+                        val = CellQualityMath::ComputeQuadSkew(pts);
                         supported = true;
                         break;
                     case QUALITY_TAPER:
-                        val = SurfaceMeshMetricsFilter::ComputeQuadTaper(pts);
+                        val = CellQualityMath::ComputeQuadTaper(pts);
                         supported = true;
                         break;
                     case QUALITY_STRETCH:
-                        val = SurfaceMeshMetricsFilter::ComputeQuadStretch(pts);
+                        val = CellQualityMath::ComputeQuadStretch(pts);
                         supported = true;
                         break;
                     case QUALITY_WARPAGE:
-                        val = SurfaceMeshMetricsFilter::ComputeQuadWarpage(pts);
+                        val = CellQualityMath::ComputeQuadWarpage(pts);
                         supported = true;
                         break;
                     // —— 需要全网格平均面积的 3 项 ——
                     case QUALITY_RELATIVE_SIZE_SQUARED:
                         if (avgQuadArea > 0.0) {
-                            val = SurfaceMeshMetricsFilter::ComputeQuadRelativeSizeSquared(
+                            val = CellQualityMath::ComputeQuadRelativeSizeSquared(
                                     pts, avgQuadArea);
                             supported = true;
                         }
                         break;
                     case QUALITY_SHAPE_AND_SIZE:
                         if (avgQuadArea > 0.0) {
-                            val = SurfaceMeshMetricsFilter::ComputeQuadShapeAndSize(
+                            val = CellQualityMath::ComputeQuadShapeAndSize(
                                     pts, avgQuadArea);
                             supported = true;
                         }
                         break;
                     case QUALITY_SHEAR_AND_SIZE:
                         if (avgQuadArea > 0.0) {
-                            val = SurfaceMeshMetricsFilter::ComputeQuadShearAndSize(
+                            val = CellQualityMath::ComputeQuadShearAndSize(
                                     pts, avgQuadArea);
                             supported = true;
                         }

@@ -2,7 +2,7 @@
 #define iGameCellMeshMetrics_h
 
 #include "iGameFilter.h"
-#include "iGameVolumeMeshMetricsFilter.h"
+#include "iGameCellQualityMath.h"
 
 IGAME_NAMESPACE_BEGIN
 class CellMeshMetricsFilter : public Filter {

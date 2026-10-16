@@ -63,7 +63,11 @@ public:
     void SetPoints(Points::Pointer points) { m_Points = points; }
     bool Execute() override;
 
-    
+protected:
+    VolumeMeshMetricsFilter();
+    ~VolumeMeshMetricsFilter();
+    VolumeMetric m_Metric = VolumeMetric::TET_EDGE_RATIO; //质量指标类型
+
     //四面体
     double ComputeMetric(igIndex vNum, igIndex* vhs);
     static std::vector<double> GetMinAndMaxLenOfCell(const std::vector<iGame::Point>& points);
@@ -84,23 +88,10 @@ public:
     static double GetInternalAnglesOfVertex(iGame::Point v0, iGame::Point v1, iGame::Point v2);
     static std::vector<double> GetInternalAnglesOfFace(const std::vector<iGame::Point>& points);
     static std::vector<std::vector<double>> GetInternalAnglesOfCell(const std::vector<iGame::Point>& points);
-    // —— 对齐 ParaView Cell Quality 新增（对照 Verdict 官方实现）——
-    static double ComputeTetCondition(const std::vector<iGame::Point>& points);
-    static double ComputeTetDistortion(const std::vector<iGame::Point>& points);
-    static double ComputeTetEquiangleSkew(const std::vector<iGame::Point>& points);
-    static double ComputeTetRadiusRatio(const std::vector<iGame::Point>& points);
-    static double ComputeTetScaledJacobian(const std::vector<iGame::Point>& points);
-    static double ComputeTetShape(const std::vector<iGame::Point>& points);
-    // —— 需要「网格平均单元体积」的指标（对齐 ParaView 同名项）——
-    static double ComputeTetRelativeSizeSquared(const std::vector<iGame::Point>& points,
-                                                double averageVolume);
-    static double ComputeTetShapeAndSize(const std::vector<iGame::Point>& points,
-                                         double averageVolume);
     static double GetMinInternalAnglesOfCell(const std::vector<iGame::Point>& points);
     static double GetHighOfVertex(iGame::Point v0, iGame::Point v1, iGame::Point v2, iGame::Point v3);
     static double GetVolAspectRatioOfCell(const std::vector<iGame::Point>& points);
     static double GetEquiangleSkewnessOfCell(const std::vector<iGame::Point>& points);
-    static double GetMinDihedralAngleOfTet(const std::vector<iGame::Point>& points);
 
     // 六面体
     static double ComputeHexVolume(const std::vector<iGame::Point>& points);
@@ -115,34 +106,13 @@ public:
 
     static double ComputeHexMinScaledJacobian(const std::vector<iGame::Point>& points);
     static double ComputeHexAvgScaledJacobian(const std::vector<iGame::Point>& points);
-    // —— 对齐 ParaView Cell Quality 新增（对照 Verdict 官方实现）——
-    static double ComputeHexCondition(const std::vector<iGame::Point>& points);
-    static double ComputeHexDistortion(const std::vector<iGame::Point>& points);
-    static double ComputeHexEquiangleSkew(const std::vector<iGame::Point>& points);
-    static double ComputeHexOddy(const std::vector<iGame::Point>& points);
-    static double ComputeHexScaledJacobian(const std::vector<iGame::Point>& points);
-    static double ComputeHexShape(const std::vector<iGame::Point>& points);
-    static double ComputeHexShear(const std::vector<iGame::Point>& points);
-    // —— 需要「网格平均单元体积」的 3 个指标（对齐 ParaView 同名项）——
-    static double ComputeHexRelativeSizeSquared(const std::vector<iGame::Point>& points,
-                                                double averageVolume);
-    static double ComputeHexShapeAndSize(const std::vector<iGame::Point>& points,
-                                         double averageVolume);
-    static double ComputeHexShearAndSize(const std::vector<iGame::Point>& points,
-                                         double averageVolume);
     static double ComputeTetAspectRatioAlt(const std::vector<iGame::Point>& points);
     static double ComputeTetVolumeAlt(const std::vector<iGame::Point>& points);
     static double ComputeHexVolumeAlt(const std::vector<iGame::Point>& points);
 
-    static constexpr double PI = 3.14159265358979323846;
-
-protected:
-    VolumeMeshMetricsFilter();
-    ~VolumeMeshMetricsFilter();
-    VolumeMetric m_Metric = VolumeMetric::TET_EDGE_RATIO; //质量指标类型
-
     CellArray::Pointer m_Cells = nullptr;
     Points::Pointer m_Points = nullptr;
+    static constexpr double PI = 3.14159265358979323846;
 };
 
 IGAME_NAMESPACE_END
