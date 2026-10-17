@@ -50,3 +50,5 @@ Examples/Models/ResampleCubeVector.vtk -filter -diff -merge text
 Examples/Models/TextureMapSphere.vtk -filter -diff -merge text
 Examples/Models/GhostDemo.vtk -filter -diff -merge text
 Examples/Models/Tet_Plane.vtk -filter -diff -merge text
+Examples/Models/AppendArcLength_test.vtk -filter -diff -merge text
+Examples/Models/Histogram_test.vtk -filter -diff -merge text
