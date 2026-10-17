@@ -1988,7 +1988,6 @@ void igQtMainWindow::initAllFilters() {
         {"surface_vectors", "表面向量", StandardFilterCategory::DataAttributes, false},
         {"temporal_shift_scale", "时间平移与缩放", StandardFilterCategory::Transform, false},
         {"temporal_statistics", "时间统计", StandardFilterCategory::DataAttributes, false},
-        {"tensor_principal_invariants", "张量主不变量", StandardFilterCategory::DataAttributes, false},
         {"texture_map_to_cylinder", "圆柱纹理映射", StandardFilterCategory::DataAttributes, false},
         {"texture_map_to_plane", "平面纹理映射", StandardFilterCategory::DataAttributes, false},
         {"texture_map_to_sphere", "球面纹理映射", StandardFilterCategory::DataAttributes, false},
@@ -8439,20 +8438,6 @@ void igQtMainWindow::initAllFilters() {
             true);
         });
 
-                    auto outMesh = DynamicCast<SurfaceMesh>(filter->GetOutput());
-                    modelTreeWidget->addDataObjectToModelTree(outMesh, Algorithm);
-                    rendererWidget->update();
-                    // 先弹模态提示（此时参数面板仍在、主窗口布局稳定），
-                    // 用户点“确定”返回后再关闭面板，避免先 close dock 触发布局
-                    // 重建、紧接着开模态对话框而导致 Qt 访问违例。
-                    showDarkFramelessMessage(QStringLiteral("管道生成完成"),
-                                             QStringLiteral("已将线段转换为圆管，可在模型树中查看输出结果。"),
-                                             true);
-                    dialog->close();
-                });
-                dialog->show();
-            });
-
     // 连通区域 (Connectivity)。
     connect(developingFiltersBatch2->addAction(QStringLiteral("连通区域 (Connectivity)")),
             &QAction::triggered, this, [this](bool) {
@@ -8712,10 +8697,10 @@ void igQtMainWindow::initAllFilters() {
     // 9.28 布置的第二批 filter：按上游约定追加在「开发中filter/第二批」末尾。
     // 这里只放代理入口，实际行为由「标准过滤器」里同 id 的 QAction 承担
     // （见 igQtMainWindowStandardFilters.cpp 的 filterPanel 懒加载面板）。
-    static const DevelopmentEntry batch2Entries[] = {
+    static const DevelopmentEntry tensorBatch2Entries[] = {
         {"tensor_principal_invariants", "张量主值 (Tensor Principal Invariants)"},
     };
-    for (const DevelopmentEntry& entry : batch2Entries) {
+    for (const DevelopmentEntry& entry : tensorBatch2Entries) {
         addDevelopmentAction(developingFiltersBatch2, approvedFilter(entry.id),
                              QString::fromUtf8(entry.label));
     }
