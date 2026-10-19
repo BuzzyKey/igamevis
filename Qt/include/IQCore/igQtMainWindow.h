@@ -63,6 +63,7 @@ class igQtSmoothWidget;
 class igQtExtractComponentWidget;
 class igQtLinearExtrusionWidget;
 class igQtMedianFilterWidget;
+class igQtTransformBoxController;
 class QDialog;
 class igQtHistogramChartWidget;
 
@@ -233,6 +234,8 @@ private:
     int m_axisAlignedReflectionCount{0};
     QDockWidget* m_resampleToImageDock = nullptr;
     igQtResampleToImageWidget* m_resampleToImageWidget = nullptr;
+    // 通用几何变换：面板 + 可拖拽变换盒子的控制器（面板关闭时销毁）
+    igQtTransformBoxController* m_transformController = nullptr;
     // 每类左侧工具面板占一个槽位，初始均未打开。
     std::array<int, static_cast<size_t>(LeftToolPanelId::Count)> m_leftToolTabByPanel{
         {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1}};

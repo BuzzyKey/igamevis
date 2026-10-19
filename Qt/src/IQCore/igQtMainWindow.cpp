@@ -116,6 +116,7 @@
 #include <IQWidgets/igQtVariableCorrelationWidget.h>
 #include <IQWidgets/igQtPartFocusWidget.h>
 #include <IQWidgets/igQtAttributeSelectWidget.h>
+#include <IQWidgets/igQtTransformBoxController.h>
 #include <IQComponents/Dialog/igQtBoxSettingDialog.h>
 #include <IQComponents/Dialog/igQtChromeFramelessDialog.h>
 #include <iGameBlockMapping.h>
@@ -6702,40 +6703,74 @@ void igQtMainWindow::initAllFilters() {
 
     bindDevelopmentAction("transform", [=, this]() {
         const QString title = QStringLiteral("通用几何变换");
+        // 面板已打开：只把它提到最前
+        if (m_transformController != nullptr) {
+            m_transformController->FocusPanel();
+            return;
+        }
+
         auto input = currentFilterInput(title);
         if (!input) return;
+
+        const IGenum inputType = input->GetDataObjectType();
+        if (inputType != IG_SURFACE_MESH && inputType != IG_VOLUME_MESH &&
+            inputType != IG_STRUCTURED_MESH && inputType != IG_UNSTRUCTURED_MESH &&
+            inputType != IG_POINT_SET) {
+            showDarkFramelessMessage(title,
+                                     QStringLiteral("请在模型树中选择网格或点云（多帧容器暂不支持交互变换）。"));
+            return;
+        }
+
         auto* dialog = new igQtFilterDialogDockWidget(this, true);
         dialog->setFilterTitle(title);
-        const int tx = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT, QStringLiteral("平移 X"), "0");
-        const int ty = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT, QStringLiteral("平移 Y"), "0");
-        const int tz = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT, QStringLiteral("平移 Z"), "0");
-        const int rx = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT, QStringLiteral("旋转 X (度)"), "0");
-        const int ry = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT, QStringLiteral("旋转 Y (度)"), "0");
-        const int rz = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT, QStringLiteral("旋转 Z (度)"), "0");
-        const int sx = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT, QStringLiteral("缩放 X"), "1");
-        const int sy = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT, QStringLiteral("缩放 Y"), "1");
-        const int sz = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT, QStringLiteral("缩放 Z"), "1");
+
+        std::array<int, igQtTransformBoxController::kParamCount> parameterIds{};
+        parameterIds[0] = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT, QStringLiteral("平移 X"), "0");
+        parameterIds[1] = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT, QStringLiteral("平移 Y"), "0");
+        parameterIds[2] = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT, QStringLiteral("平移 Z"), "0");
+        parameterIds[3] = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT, QStringLiteral("旋转 X (度)"), "0");
+        parameterIds[4] = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT, QStringLiteral("旋转 Y (度)"), "0");
+        parameterIds[5] = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT, QStringLiteral("旋转 Z (度)"), "0");
+        parameterIds[6] = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT, QStringLiteral("缩放 X"), "1");
+        parameterIds[7] = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT, QStringLiteral("缩放 Y"), "1");
+        parameterIds[8] = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT, QStringLiteral("缩放 Z"), "1");
+
+        // 「重置」按钮：参数回到单位变换、盒子回到初始包围盒（模型不变，需要应用才生效）
+        auto* resetRow = new QWidget(dialog);
+        auto* resetLayout = new QHBoxLayout(resetRow);
+        resetLayout->setContentsMargins(0, 0, 0, 0);
+        auto* resetButton = new QPushButton(QStringLiteral("重置"), resetRow);
+        resetLayout->addStretch();
+        resetLayout->addWidget(resetButton);
+        dialog->addRowWidget(resetRow);
         dialog->show();
-        dialog->setApplyFunctor([=, this]() {
-            const int ids[] = {tx, ty, tz, rx, ry, rz, sx, sy, sz};
-            double values[9]{};
-            for (int i = 0; i < 9; ++i) {
-                bool ok = false;
-                values[i] = dialog->getDouble(ids[i], ok);
-                if (!ok) { showDarkFramelessMessage(title, QStringLiteral("变换参数必须是数字。")); return; }
-            }
-            if (values[6] == 0 || values[7] == 0 || values[8] == 0) {
-                showDarkFramelessMessage(title, QStringLiteral("缩放值不能为 0。")); return;
-            }
-            auto filter = TransformFilter::New();
-            filter->SetInput(input);
-            filter->SetTranslation(values[0], values[1], values[2]);
-            filter->SetRotation(values[3], values[4], values[5]);
-            filter->SetScale(values[6], values[7], values[8]);
-            filter->BuildMatrix();
-            if (!filter->Execute()) { showDarkFramelessMessage(title, QStringLiteral("几何变换失败。")); return; }
-            refreshFilterResult(input, filter->GetOutput(), title);
-            dialog->close();
+
+        m_transformController =
+                new igQtTransformBoxController(input, rendererWidget, dialog, parameterIds, this);
+        connect(resetButton, &QPushButton::clicked, this, [this]() {
+            if (m_transformController != nullptr) { m_transformController->Reset(); }
+        });
+        connect(m_transformController, &igQtTransformBoxController::Applied, this,
+                [=, this](DataObject::Pointer output) {
+                    refreshFilterResult(input, output, title);
+                    if (auto* item = modelTreeWidget->getItemFromObject(input)) {
+                        item->changeVisibility(false);
+                        rendererWidget->update();
+                    }
+                });
+        connect(m_transformController, &igQtTransformBoxController::Failed, this,
+                [this, title]() { showDarkFramelessMessage(title, QStringLiteral("几何变换失败。")); });
+        connect(m_transformController, &igQtTransformBoxController::Closed, this, [this]() {
+            if (m_transformController == nullptr) { return; }
+            m_transformController->deleteLater();
+            m_transformController = nullptr;
+        });
+        if (!m_transformController->HasBox()) {
+            showDarkFramelessMessage(title, QStringLiteral("交互盒子创建失败，仍可手动输入参数后应用。"));
+        }
+
+        dialog->setApplyFunctor([this]() {
+            if (m_transformController != nullptr) { m_transformController->Apply(); }
         });
     });
 
