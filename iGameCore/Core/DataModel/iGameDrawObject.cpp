@@ -147,6 +147,9 @@ void DrawObject::ConvertToDrawableData() {
 }
 
 bool DrawObject::IsUseSinglePassWireframeRendering() {
+    // Triangle edge masks cannot draw independent POLYDATA LINES. Use the
+    // surface + line passes for mixed-dimensional geometry.
+    if (HasExplicitLineCells()) { return false; }
     if (m_TriangleIndices->GetNumberOfElements() && m_TriangleEdgeMasks->GetNumberOfElements() &&
         (!m_RemoteRenderingEnabled || (m_ColorWithCell ? m_CellEdgeMaskAvailable : m_EdgeMaskAvailable))) {
         return true;
@@ -182,6 +185,7 @@ void DrawObject::SetRemoteRenderingEnabled(bool enabled) {
 
 bool DrawObject::NeedsExplicitWireframeGeometry(IGenum viewStyle) {
     if (!m_RemoteRenderingEnabled) return true; // main eagerly prepares explicit edges.
+    if (HasExplicitLineCells() && (viewStyle & (IG_SURFACE | IG_WIREFRAME))) { return true; }
     if ((viewStyle & IG_WIREFRAME) == 0) { return false; }
 #ifdef __EMSCRIPTEN__
     return true;
@@ -194,6 +198,9 @@ bool DrawObject::NeedsExplicitWireframeGeometry(IGenum viewStyle) {
 }
 
 void DrawObject::MarkWireframeGeometryDirtyIfNeeded(IGenum viewStyle) {
+    // Mixed geometry adds polygon boundary lines only in wireframe mode.
+    // Rebuild on representation changes without overwriting the input LINES.
+    if (HasExplicitLineCells()) { m_ReConvertToDrawableData = true; return; }
     if (!m_RemoteRenderingEnabled) return;
     // Composite parents only forward state, and shell-rendered sources forward
     // drawing to their SurfaceMesh. Mark only the leaf owning the draw arrays.
